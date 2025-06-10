@@ -4,3 +4,6 @@
 [submodule "Light-ASD"]
 	path = Light-ASD
 	url = https://github.com/Junhua-Liao/Light-ASD
+[submodule "LR-ASD"]
+	path = LR-ASD
+	url = https://github.com/Junhua-Liao/LR-ASD
