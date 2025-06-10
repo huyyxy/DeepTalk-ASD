@@ -7,3 +7,6 @@
 [submodule "LR-ASD"]
 	path = LR-ASD
 	url = https://github.com/Junhua-Liao/LR-ASD
+[submodule "loconet_asd"]
+	path = loconet_asd
+	url = https://github.com/sjtuwxz/loconet_asd
