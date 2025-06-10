@@ -1,0 +1,3 @@
+[submodule "TalkNet-ASD"]
+	path = TalkNet-ASD
+	url = https://github.com/TaoRuijie/TalkNet-ASD
