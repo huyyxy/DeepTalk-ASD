@@ -1,0 +1,10 @@
+# pip3 install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu121
+dotenv
+termcolor
+tornado
+python_speech_features
+numpy-1.26.4
+opencv-python
+scipy
+pandas
+tqdm
