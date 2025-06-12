@@ -56,15 +56,13 @@ def proc(input_queue: queue.Queue):
                 face_profiles = data_info.get('face_profiles')
                 profiles = []
                 for face_profile in face_profiles:
-                    face_image_base64 = face_profile.get('image')
-                    face_image_bytes = base64.b64decode(face_image_base64)
-                    # 将字节流转换为一维 numpy 数组
-                    face_image_array = np.frombuffer(face_image_bytes, dtype=np.uint8)
-                    # 使用 cv2.imdecode 解码为 OpenCV 图像
-                    face_image = cv2.imdecode(face_image_array, cv2.IMREAD_COLOR)
+                    gray_face_jpg_base64 = face_profile.get('image')
+                    gray_face_jpg_buffer = base64.b64decode(gray_face_jpg_base64)
+                    gray_face_jpg_nparray = np.frombuffer(gray_face_jpg_buffer, np.uint8)
+                    gray_face_image = cv2.imdecode(gray_face_jpg_nparray, cv2.IMREAD_GRAYSCALE)
                     profile = {
                         "id": face_profile.get('id'),
-                        "image": face_image
+                        "image": gray_face_image
                     }
                     profiles.append(profile)
                 asd_detector.append_video(profiles, create_time)
@@ -95,14 +93,4 @@ def proc(input_queue: queue.Queue):
         traceback.print_exc()
     finally:
         logger.info(f"[DataWebSocketHandler]proc over.")
-
-
-
-
-
-
-
-
-
-
 
