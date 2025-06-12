@@ -14,7 +14,8 @@ MAX_SILENCE_DURATION = 0.52
 
 
 def proc(input_queue: queue.Queue):
-    factory = ASDDetectorFactory('LR-ASD', model_path='/home/william/Workspace/DeepTalk-ASD/LR_ASD/weight/finetuning_TalkSet.model')
+    # factory = ASDDetectorFactory('LR-ASD', model_path='/home/william/Workspace/DeepTalk-ASD/LR_ASD/weight/finetuning_TalkSet.model')
+    factory = ASDDetectorFactory('TalkNet', model_path='/home/william/Workspace/DeepTalk-ASD/TalkNet_ASD/pretrain_AVA.model')
     asd_detector = factory.asd_detector()
 
     start_time = time.perf_counter()
