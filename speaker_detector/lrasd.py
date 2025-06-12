@@ -31,6 +31,7 @@ class LRASDSpeakerDetector:
         # 初始化模型
         self.model = ASD()
         model_path = kwargs.get('model_path')
+        print(f"\r\n\r\nlr asd model path ======> {model_path}\r\n\r\n")
         if model_path:
             self.model.load_state_dict(torch.load(model_path))
         self.model.to(self.device)
@@ -44,7 +45,7 @@ class LRASDSpeakerDetector:
         self.last_video_time = 0
         self.last_audio_time = 0
     
-    def append_video(self, frame_faces):
+    def append_video(self, frame_faces, create_time):
         """
         添加视频帧中已检测的人脸信息
         
@@ -83,22 +84,22 @@ class LRASDSpeakerDetector:
                 }
             
             self.tracks[tracker_id]['faces'].append(face_resized)
-            self.tracks[tracker_id]['timestamps'].append(current_time)
+            self.tracks[tracker_id]['timestamps'].append(create_time)
         
-        self.last_video_time = current_time
+        self.last_video_time = create_time
     
-    def append_audio(self, audio_chunk):
+    def append_audio(self, audio_chunk, create_time):
         """添加音频块到处理队列"""
         current_time = time.time() - self.start_time
         
         # 将音频块添加到缓冲区
         self.audio_buffer = np.concatenate((self.audio_buffer, audio_chunk)) 
-        self.audio_timestamps.append(current_time)
+        self.audio_timestamps.append(create_time)
         
         # 更新音频持续时间
         self.audio_duration = len(self.audio_buffer) / self.audio_sample_rate
         # print(f"self.audio_duration ss = {self.audio_duration}")
-        self.last_audio_time = current_time
+        self.last_audio_time = create_time
     
     def _extract_features(self, audio_segment, face_segment):
         """提取音频和视频特征"""
@@ -141,16 +142,18 @@ class LRASDSpeakerDetector:
             # print(f"embedA shape: {embedA.shape}")
             # print(f"embedV shape: {embedV.shape}")
             out = self.model.model.forward_audio_visual_backend(embedA, embedV)
-            score = self.model.lossAV.forward(out, labels = None)
-            score = np.round((np.mean(np.array(score), axis = 0)), 1).astype(float)
+            print(f"out ======> {out}")
+            # score = self.model.lossAV.forward(out, labels = None)
+            # print(f"score ======> {score}")
+            # score = np.round((np.mean(np.array(score), axis = 0)), 1).astype(float)
             # print(f"====== after self.model.model.forward_audio_visual_backend({out.shape}) ======")
             # score = torch.sigmoid(out).item()
 
             # 应用 sigmoid 激活函数
-            # probabilities = torch.sigmoid(out)
+            probabilities = torch.sigmoid(out)
         
             # 计算平均得分作为最终结果
-            # score = probabilities.mean().item()
+            score = probabilities.mean().item()
         
         return score
     

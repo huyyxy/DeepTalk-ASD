@@ -14,7 +14,7 @@ MAX_SILENCE_DURATION = 0.52
 
 
 def proc(input_queue: queue.Queue):
-    factory = ASDDetectorFactory('LR-ASD')
+    factory = ASDDetectorFactory('LR-ASD', model_path='/home/william/Workspace/DeepTalk-ASD/LR_ASD/weight/finetuning_TalkSet.model')
     asd_detector = factory.asd_detector()
 
     start_time = time.perf_counter()
@@ -51,6 +51,7 @@ def proc(input_queue: queue.Queue):
 
             type = data_info.get('type')
             if type == 'video':
+                create_time = data_info.get('create_time')
                 face_profiles = data_info.get('face_profiles')
                 profiles = []
                 for face_profile in face_profiles:
@@ -65,14 +66,16 @@ def proc(input_queue: queue.Queue):
                         "image": face_image
                     }
                     profiles.append(profile)
-                asd_detector.append_video(profiles)
+                asd_detector.append_video(profiles, create_time)
                 pass
             elif type == 'audio':
+                # print(f"audio data_info ======> {data_info}")
+                create_time = data_info.get('create_time')
                 audio_chunk_base64 = data_info.get('audio_chunk')
                 vad_type = data_info.get('vad_type', -1)
                 audio_bytes = base64.b64decode(audio_chunk_base64)
                 audio_chunk = np.frombuffer(audio_bytes, dtype=np.int16)
-                asd_detector.append_audio(audio_chunk)
+                asd_detector.append_audio(audio_chunk, create_time)
                 last_audio_time = create_time
                 if vad_type == 4:
                     asd_detector.evaluate()

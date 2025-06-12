@@ -14,7 +14,7 @@ class ASDInterface:
         """
         pass
     
-    def append_video(self, frame_faces):
+    def append_video(self, frame_faces, create_time = None):
         """
         添加视频帧中已检测的人脸信息
         
@@ -31,7 +31,7 @@ class ASDInterface:
         """
         pass
     
-    def append_audio(self, audio_chunk):
+    def append_audio(self, audio_chunk, create_time = None):
         """添加音频块到处理队列"""
         pass
     
