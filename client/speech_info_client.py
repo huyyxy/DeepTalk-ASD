@@ -198,15 +198,18 @@ class SpeechInfoClient:
                 self.no_speech_count = 0
             else:
                 if self.speech_start_time > 0.001 and self.no_speech_count < 60:
-                    vad_type = VADType.VAD_SILENCE
+                    if self.no_speech_count == 1:
+                        vad_type = VADType.VAD_END_NORMAL
+                    else:
+                        vad_type = VADType.VAD_SILENCE
                     self.no_speech_count += 1
                 else:
-                    if time.perf_counter() - self.speech_start_time > 0.52:
+                    if self.speech_start_time < 0.001 and self.speech_start_time > -0.001:
+                        vad_type = VADType.NON_SPEECH
+                    elif time.perf_counter() - self.speech_start_time > 0.52:
                         vad_type = VADType.VAD_END_NORMAL
                     elif self.speech_start_time > 0.001:
                         vad_type = VADType.VAD_DISCARD_SHORT
-                    else:
-                        vad_type = VADType.NON_SPEECH
                     self.speech_start_time = 0.0
             
             speech_info["vad_type"] = vad_type.value
