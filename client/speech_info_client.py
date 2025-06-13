@@ -118,7 +118,7 @@ class SpeechInfoClient:
     def stop(self):
         """Stop the client and WebSocket communication."""
         self.is_running = False
-        self.speech_info_process_executor.shutdown(wait=False)
+        self.speech_info_process_executor.shutdown(wait=False, cancel_futures=True)
 
     def _is_speech(self, buf, sample_rate):
         return self.vad.is_speech(buf, sample_rate)

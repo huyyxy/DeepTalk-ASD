@@ -5,45 +5,50 @@ class ASDInterface:
     """活动说话者检测核心类"""
     def __init__(self, **kwargs):
         """
-        初始化活动说话者检测系统
+        初始化活动说话者检测系统，通过kwargs可以获得device
         
         参数:
-            video_fps: 视频帧率
-            audio_sample_rate: 音频采样率
             device: 计算设备(cpu或cuda)
         """
         pass
     
     def append_video(self, frame_faces, create_time = None):
         """
-        添加视频帧中已检测的人脸信息
-        
+        添加视频帧中已检测的人脸信息，视频帧率为30
+
         参数:
             frame_faces: 当前帧的人脸检测结果列表，每个元素为字典:
                 [
                     {
-                        'id': tracker_id,   # 人脸的tracker id
-                        'bbox': [x1, y1, x2, y2],  # 边界框坐标
-                        'image': face_image         # 裁剪后的人脸图像
+                        'id': tracker_id1,   # 人脸的tracker id
+                        'image': face_gray1         # 裁剪后的人脸图像，灰度图
+                    },
+                    {
+                        'id': tracker_id2,   # 人脸的tracker id
+                        'image': face_gray2         # 裁剪后的人脸图像，灰度图
                     },
                     ... # 可能多个人脸
                 ]
+            create_time: 此块audio_chunk的创建时间，调用方一般使用time.perf_counter()获得，用于和音频块时间对齐
         """
         pass
     
     def append_audio(self, audio_chunk, create_time = None):
-        """添加音频块到处理队列"""
-        pass
-    
-    def evaluate(self, window_seconds=1.0):
         """
-        评估当前活动说话者
+        添加音频块到处理队列
         
         参数:
-            window_seconds: 评估窗口大小(秒)
+            audio_chunk: pcm_data，一般为16bit，单声道，16000Hz，30ms时长音频块
+            create_time: 此块audio_chunk的创建时间，调用方一般使用time.perf_counter()获得，用于和视频帧时间对其
+        """
+        pass
+    
+    def evaluate(self):
+        """
+        评估当前活动说话者，一般是前置VAD检测发现结束说话时调用
         
         返回:
-            活动说话者的tracker_id和置信度得分
+            最新时间点的活动说话者的tracker_id和置信度得分
         """
         pass
     

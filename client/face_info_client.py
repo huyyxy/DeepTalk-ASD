@@ -55,7 +55,7 @@ class FaceInfoClient:
     def stop(self):
         """Stop the client and WebSocket communication."""
         self.is_running = False
-        self.face_info_process_executor.shutdown(wait=False)
+        self.face_info_process_executor.shutdown(wait=False, cancel_futures=True)
         pass
 
     def detect_faces(self, color_frame):
