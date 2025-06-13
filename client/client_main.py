@@ -12,6 +12,7 @@ from websocket_client import WebsocketClient
 from cv2_capture import Cv2Capture
 import time
 
+
 # Configurations
 ASD_WS_URL = os.getenv('ASD_WS_URL', 'ws://192.168.20.187:7900/data')
 

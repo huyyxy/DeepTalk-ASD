@@ -1,4 +1,5 @@
 import time
+import os
 import datetime
 import logging
 import threading
@@ -17,6 +18,7 @@ import queue
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
 
+ROBOT_ID = os.getenv('ROBOT_ID', '1')
 FRAME_INTERVAL = 0  # seconds
 
 face_profiles = {
@@ -151,7 +153,7 @@ class FaceInfoClient:
 
             face_info = {
                 "type": "video",
-                "robot_id": "1",
+                "robot_id": ROBOT_ID,
                 "create_time": create_time,
                 "face_profiles": face_list,
             }

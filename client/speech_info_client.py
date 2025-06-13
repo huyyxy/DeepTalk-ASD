@@ -17,6 +17,7 @@ from pyvadfactory import Factory as VadFactory
 logging.basicConfig(level=logging.INFO)
 
 
+ROBOT_ID = os.getenv('ROBOT_ID', '1')
 MIC_DEVICE_NAME = os.getenv('MIC_DEVICE_NAME', 'MacBook Pro麦克风')
 
 # 麦克风配置
@@ -183,7 +184,7 @@ class SpeechInfoClient:
             vad_type = VADType.NON_SPEECH
             speech_info = {
                 "type": "audio",
-                "robot_id": "1",
+                "robot_id": ROBOT_ID,
                 "create_time": create_time,
                 "audio_chunk": base64.b64encode(org_pcm_data).decode('utf-8'),
             }

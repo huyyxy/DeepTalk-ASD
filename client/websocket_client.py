@@ -1,20 +1,21 @@
 import time
+import os
 import datetime
 import logging
 import threading
-import cv2
 import websocket
 import json
 import base64
 import traceback
 import queue
-from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor
 
 
 # Setup basic logging
 logging.basicConfig(level=logging.INFO)
 
+
+ROBOT_ID = os.getenv('ROBOT_ID', '1')
 
 class WebsocketClient:
 
@@ -86,6 +87,13 @@ class WebsocketClient:
         """Handle WebSocket opening and start sending frames."""
         logging.info(f"[WebsocketClient]WebSocket connection opened")
         # threading.Thread(target=self.capture_and_send_faces, daemon=True).start()
+        init_message = {
+            "robot_id":ROBOT_ID,
+            "type":"init",
+            "create_time":time.time(),
+        }
+        message_str = json.dumps(init_message, ensure_ascii=False)
+        self.ws.send(message_str)
 
     def on_message(self, ws:websocket.WebSocketApp, message):
         logging.info(f"[WebsocketClient]Message received from server. message ======> {message}")
