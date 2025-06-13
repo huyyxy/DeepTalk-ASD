@@ -19,14 +19,6 @@ logger = DeepTalkLogger(__name__)
 
 if __name__ == "__main__":
     logger.info(f"====== Start Main ======")
-
-    worker_thread = ThreadPoolExecutor(1, thread_name_prefix="worker")
-
-    date_queue = queue.Queue()
-    score_queue = queue.Queue()
-
-    worker_thread.submit(proc, date_queue)
-
     try:
         server.start(date_queue, score_queue)
     except KeyboardInterrupt:
@@ -35,5 +27,4 @@ if __name__ == "__main__":
         logger.info(f"=== 程序终止: Exception ===")
         traceback.print_exc()
     finally:
-        worker_thread.shutdown(wait=True, cancel_futures=True)
         logger.info(f"=== 资源清理完毕，退出程序。 ===")

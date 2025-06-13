@@ -13,10 +13,15 @@ logger = DeepTalkLogger(__name__)
 MAX_SILENCE_DURATION = 0.52
 
 
-def proc(input_queue: queue.Queue):
-    # factory = ASDDetectorFactory('LR-ASD', model_path='/home/william/Workspace/DeepTalk-ASD/LR_ASD/weight/finetuning_TalkSet.model')
-    # factory = ASDDetectorFactory('TalkNet', model_path='/home/william/Workspace/DeepTalk-ASD/TalkNet_ASD/pretrain_AVA.model')
-    factory = ASDDetectorFactory('Light-ASD', model_path='/home/william/Workspace/DeepTalk-ASD/Light_ASD/weight/finetuning_TalkSet.model')
+def proc(input_queue: queue.Queue, config: dict):
+    asd_model_type = config.get('asd_model_type', 'LR-ASD')
+    video_fps = config.get('video_fps', 25)
+    audio_sample_rate = config.get('audio_sample_rate', 16000)
+
+    # factory = ASDDetectorFactory('LR-ASD', model_path='./LR_ASD/weight/finetuning_TalkSet.model')
+    # factory = ASDDetectorFactory('TalkNet', model_path='./TalkNet_ASD/pretrain_AVA.model')
+    # factory = ASDDetectorFactory('Light-ASD', model_path='./Light_ASD/weight/finetuning_TalkSet.model')
+    factory = ASDDetectorFactory(asd_model_type, video_fps=video_fps, audio_sample_rate=audio_sample_rate)
     asd_detector = factory.asd_detector()
 
     start_time = time.perf_counter()
@@ -28,21 +33,9 @@ def proc(input_queue: queue.Queue):
                 now = time.perf_counter()
                 data_info = input_queue.get_nowait()  # 尝试不阻塞地从队列取出项
             except queue.Empty:  # 如果队列是空的，则等待一段时间
-                # if now - last_audio_time > MAX_SILENCE_DURATION:
-                #     # 
-                #     asd_detector.evaluate()
-                #     # asd_detector.reset()
-                #     last_audio_time = now
-                #     pass
                 time.sleep(0.01)  # 使用 asyncio 的 sleep
                 continue
             if data_info is None:
-                # if now - last_audio_time > MAX_SILENCE_DURATION:
-                #     # 
-                #     asd_detector.evaluate()
-                #     # asd_detector.reset()
-                #     last_audio_time = now
-                #     pass
                 time.sleep(0.01)  # 遇到None则可能要退出或者做特别处理
                 continue
             
@@ -78,23 +71,11 @@ def proc(input_queue: queue.Queue):
                 if vad_type == 1:
                     asd_detector.reset()
                 asd_detector.append_audio(audio_chunk, create_time)
-                last_audio_time = create_time
                 if vad_type == 4:
                     asd_detector.evaluate()
                 pass
-
-            # if now - last_audio_time > MAX_SILENCE_DURATION:
-            #     # 
-            #     asd_detector.evaluate()
-            #     # asd_detector.reset()
-            #     last_audio_time = create_time
-            #     pass
-            
-
     except Exception as e:
         logger.error(f"proc Error: {e}")
         traceback.print_exc()
     finally:
-        logger.info(f"[DataWebSocketHandler]proc over.")
-
-
+        logger.info(f"thread proc over.")

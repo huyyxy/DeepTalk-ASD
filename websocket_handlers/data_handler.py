@@ -4,9 +4,10 @@ import queue
 import tornado.websocket
 import tornado.ioloop
 import time
-import struct
 import traceback
 import json
+from worker import proc
+from concurrent.futures import ThreadPoolExecutor
 
 
 logger = DeepTalkLogger(__name__)
@@ -15,9 +16,11 @@ logger = DeepTalkLogger(__name__)
 class DataWebSocketHandler(tornado.websocket.WebSocketHandler):
 
 
-    def initialize(self, input_queue: queue.Queue, output_queue: queue.Queue):
-        self.data_queue = input_queue
-        self.output_queue = output_queue
+    def initialize(self):
+        self.input_queue = queue.Queue()
+        self.output_queue = queue.Queue()
+
+        self.worker_thread = ThreadPoolExecutor(1, thread_name_prefix="worker")
         pass
 
     def open(self):
@@ -51,17 +54,24 @@ class DataWebSocketHandler(tornado.websocket.WebSocketHandler):
         type = json_message.get('type')
         robot_id = json_message.get('robot_id')
         create_time = json_message.get('create_time')
-        if type == 'video':
-            self.data_queue.put(json_message)
+        if type == 'init':
+            config = json_message
+            self.worker_thread.submit(proc, self.input_queue, config)
+            pass
+        elif type == 'video':
+            self.input_queue.put(json_message)
             pass
         elif type == 'audio':
-            self.data_queue.put(json_message)
+            self.input_queue.put(json_message)
             pass
         pass
 
 
     def on_close(self):
-        logger.info(f"Audio WebSocket closed")
+        logger.info(f"Data WebSocket closed")
+        if self.worker_thread:
+            self.worker_thread.shutdown(wait=True, cancel_futures=True)
+            self.worker_thread = False
 
     
     def check_origin(self, origin):
