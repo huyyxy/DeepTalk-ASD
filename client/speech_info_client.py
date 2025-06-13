@@ -148,7 +148,7 @@ class SpeechInfoClient:
             while not stop_event.is_set():
                 if mic_stream.is_active():
                     org_pcm_data = mic_stream.read(INPUT_CHUNK_SIZE)
-                    self.speech_info_process_executor.submit(self.process_and_send_speech, {"create_time": time.perf_counter(), "data": org_pcm_data})
+                    self.speech_info_process_executor.submit(self.process_and_send_speech, {"create_time": time.time(), "data": org_pcm_data})
                 else:
                     print("=== mic_stream is not active ===")
         except Exception as e:
@@ -166,7 +166,7 @@ class SpeechInfoClient:
         在单线程池中处理，捕获视频帧，检测人脸信息，并将其发送到WebSocket服务器。
         """
         create_time = message["create_time"]
-        if time.perf_counter() - create_time > 1.0:
+        if time.time() - create_time > 1.0:
             # 丢弃过期消息
             return
         
@@ -191,7 +191,7 @@ class SpeechInfoClient:
             is_speech = self._is_speech(dst_pcm_data, OUTPUT_RATE)
             if is_speech:
                 if self.speech_start_time < 0.001 and self.speech_start_time > -0.001:
-                    self.speech_start_time = time.perf_counter()
+                    self.speech_start_time = time.time()
                     vad_type = VADType.VAD_START
                 else:
                     vad_type = VADType.VAD_CONTINUE
@@ -206,7 +206,7 @@ class SpeechInfoClient:
                 else:
                     if self.speech_start_time < 0.001 and self.speech_start_time > -0.001:
                         vad_type = VADType.NON_SPEECH
-                    elif time.perf_counter() - self.speech_start_time > 0.52:
+                    elif time.time() - self.speech_start_time > 0.52:
                         vad_type = VADType.VAD_END_NORMAL
                     elif self.speech_start_time > 0.001:
                         vad_type = VADType.VAD_DISCARD_SHORT

@@ -42,7 +42,7 @@ class FaceInfoClient:
         self.face_info_process_executor = ThreadPoolExecutor(max_workers=1)
         self.output_queue = output_queue
         
-        self.last_focus_2_face_time = time.perf_counter()
+        self.last_focus_2_face_time = time.time()
         self.is_running = True
         self.first_zero = True
         self.send_face_info = True
@@ -99,7 +99,7 @@ class FaceInfoClient:
                 
                 frame_counter.call()
 
-                self.face_info_process_executor.submit(self.detect_and_send_face, {"create_time": time.perf_counter(), "frame": frame_bgr})
+                self.face_info_process_executor.submit(self.detect_and_send_face, {"create_time": time.time(), "frame": frame_bgr})
 
                 if FRAME_INTERVAL > 0.001:
                     time.sleep(FRAME_INTERVAL)
@@ -116,7 +116,7 @@ class FaceInfoClient:
         在单线程池中处理，捕获视频帧，检测人脸信息，并将其发送到WebSocket服务器。
         """
         create_time = message["create_time"]
-        if time.perf_counter() - create_time > 1.0:
+        if time.time() - create_time > 1.0:
             # 丢弃过期消息
             return
         
@@ -132,20 +132,21 @@ class FaceInfoClient:
             face_list = []
             for id, profile in face_profiles.get('profiles', {}).items():
                 face_image = profile.get('face_image')
-                gray_face_image = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
+                face_gray_image = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
                 # 设置 JPEG 图像的压缩质量
                 quality = 70  # 你可以根据需要调整这个值，范围是0-100，100为最高质量
                 encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
-                retval, buffer = cv2.imencode('.jpg', gray_face_image, encode_param)
+                retval, face_jpg_buffer = cv2.imencode('.jpg', face_gray_image, encode_param)
                 # 确保编码成功
-                if retval:
-                    # 将图像字节编码为Base64
-                    jpg_as_text = base64.b64encode(buffer).decode('utf-8')
-                else:
+                if not retval:
                     continue
+
+                # 将图像字节编码为Base64
+                face_jpg_base64 = base64.b64encode(face_jpg_buffer).decode('utf-8')
+
                 face_list.append({
                     "id": id,
-                    "image": jpg_as_text
+                    "image": face_jpg_base64
                 })
 
             face_info = {
