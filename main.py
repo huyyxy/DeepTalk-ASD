@@ -7,11 +7,8 @@ except FileNotFoundError:
     pass
 
 from deeptalk_logger import DeepTalkLogger
-import queue
 from websocket_handlers import server
-from worker import proc
 import traceback
-from concurrent.futures import ThreadPoolExecutor
 
 
 
@@ -20,7 +17,7 @@ logger = DeepTalkLogger(__name__)
 if __name__ == "__main__":
     logger.info(f"====== Start Main ======")
     try:
-        server.start(date_queue, score_queue)
+        server.start()
     except KeyboardInterrupt:
         logger.info(f"=== 程序终止: KeyboardInterrupt ===")
     except Exception:
