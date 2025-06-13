@@ -10,3 +10,6 @@
 [submodule "loconet_asd"]
 	path = loconet_asd
 	url = https://github.com/sjtuwxz/loconet_asd
+[submodule "LoCoNet_ASD"]
+	path = LoCoNet_ASD
+	url = https://github.com/SJTUwxz/LoCoNet_ASD.git
