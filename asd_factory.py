@@ -31,11 +31,7 @@ class ASDDetectorFactory:
                 sys.path.insert(0, submodule_path)
 
                 from speaker_detector.talknet import TalkNetSpeakerDetector
-                video_fps = self.kwargs.get('video_fps', 30)
-                audio_sample_rate = self.kwargs.get('audio_sample_rate', 16000)
-                device = self.kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
-                model_path = self.kwargs.get('model_path')
-                detector = TalkNetSpeakerDetector(video_fps=video_fps, audio_sample_rate=audio_sample_rate, device=device, model_path=model_path)
+                detector = TalkNetSpeakerDetector(**self.kwargs)
                 return detector
             elif self.type == 'LoCoNet':
                 pass
@@ -50,11 +46,7 @@ class ASDDetectorFactory:
                 sys.path.insert(0, submodule_path)
 
                 from speaker_detector.lightasd import LightASDSpeakerDetector
-                video_fps = self.kwargs.get('video_fps', 30)
-                audio_sample_rate = self.kwargs.get('audio_sample_rate', 16000)
-                device = self.kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
-                model_path = self.kwargs.get('model_path')
-                detector = LightASDSpeakerDetector(video_fps=video_fps, audio_sample_rate=audio_sample_rate, device=device, model_path=model_path)
+                detector = LightASDSpeakerDetector(**self.kwargs)
                 return detector
             elif self.type == 'LR-ASD':
                 # 获取当前文件的路径
@@ -65,11 +57,7 @@ class ASDDetectorFactory:
                 sys.path.insert(0, submodule_path)
 
                 from speaker_detector.lrasd import LRASDSpeakerDetector
-                video_fps = self.kwargs.get('video_fps', 30)
-                audio_sample_rate = self.kwargs.get('audio_sample_rate', 16000)
-                device = self.kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
-                model_path = self.kwargs.get('model_path')
-                detector = LRASDSpeakerDetector(video_fps=video_fps, audio_sample_rate=audio_sample_rate, device=device, model_path=model_path)
+                detector = LRASDSpeakerDetector(**self.kwargs)
                 return detector
         except Exception as e:
             traceback.print_exc()
