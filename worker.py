@@ -74,6 +74,8 @@ def proc(input_queue: queue.Queue):
                 vad_type = data_info.get('vad_type', -1)
                 audio_bytes = base64.b64decode(audio_chunk_base64)
                 audio_chunk = np.frombuffer(audio_bytes, dtype=np.int16)
+                if vad_type == 1:
+                    asd_detector.reset()
                 asd_detector.append_audio(audio_chunk, create_time)
                 last_audio_time = create_time
                 if vad_type == 4:
@@ -93,4 +95,5 @@ def proc(input_queue: queue.Queue):
         traceback.print_exc()
     finally:
         logger.info(f"[DataWebSocketHandler]proc over.")
+
 
