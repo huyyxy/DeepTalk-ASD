@@ -5,6 +5,7 @@ import time
 import numpy as np
 import base64
 import cv2
+import threading
 from asd_factory import ASDDetectorFactory
 
 
@@ -13,7 +14,7 @@ logger = DeepTalkLogger(__name__)
 MAX_SILENCE_DURATION = 0.52
 
 
-def proc(input_queue: queue.Queue, config: dict):
+def proc(input_queue: queue.Queue, stop_event: threading.Event, config: dict):
     asd_model_type = config.get('asd_model_type', 'LR-ASD')
     video_fps = config.get('video_fps', 25)
     audio_sample_rate = config.get('audio_sample_rate', 16000)
@@ -28,7 +29,7 @@ def proc(input_queue: queue.Queue, config: dict):
     last_time = time.perf_counter()
     last_audio_time = time.perf_counter()
     try:
-        while True:
+        while not stop_event.is_set():
             try:
                 now = time.perf_counter()
                 data_info = input_queue.get_nowait()  # 尝试不阻塞地从队列取出项

@@ -6,6 +6,7 @@ import tornado.ioloop
 import time
 import traceback
 import json
+import threading
 from worker import proc
 from concurrent.futures import ThreadPoolExecutor
 
@@ -17,6 +18,7 @@ class DataWebSocketHandler(tornado.websocket.WebSocketHandler):
 
 
     def initialize(self):
+        self.stop_event = threading.Event()
         self.input_queue = queue.Queue()
         self.output_queue = queue.Queue()
 
@@ -31,7 +33,7 @@ class DataWebSocketHandler(tornado.websocket.WebSocketHandler):
     # 用 async def 声明 who_speak_run 为一个异步函数
     async def who_speak_run(self):
         try:
-            while True:
+            while not self.stop_event.is_set():
                 try:
                     score_info = self.output_queue.get_nowait()  # 尝试不阻塞地从队列取出项
                 except queue.Empty:  # 如果队列是空的，则等待一段时间
@@ -56,7 +58,7 @@ class DataWebSocketHandler(tornado.websocket.WebSocketHandler):
         create_time = json_message.get('create_time')
         if type == 'init':
             config = json_message
-            self.worker_thread.submit(proc, self.input_queue, config)
+            self.worker_thread.submit(proc, self.input_queue, self.stop_event, config)
             pass
         elif type == 'video':
             self.input_queue.put(json_message)
@@ -69,8 +71,9 @@ class DataWebSocketHandler(tornado.websocket.WebSocketHandler):
 
     def on_close(self):
         logger.info(f"Data WebSocket closed")
+        self.stop_event.set()
         if self.worker_thread:
-            self.worker_thread.shutdown(wait=True, cancel_futures=True)
+            self.worker_thread.shutdown(wait=False, cancel_futures=True)
             self.worker_thread = False
 
     
