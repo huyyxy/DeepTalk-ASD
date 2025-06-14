@@ -91,6 +91,7 @@ class WebsocketClient:
             "robot_id":ROBOT_ID,
             "type":"init",
             "create_time":time.time(),
+            "asd_model_type": "LR-ASD" # TalkNet Light-ASD LR-ASD
         }
         message_str = json.dumps(init_message, ensure_ascii=False)
         self.ws.send(message_str)
