@@ -1,9 +1,12 @@
+from deeptalk_logger import DeepTalkLogger
 from asd_interface import ASDInterface
 import torch
 import traceback
 import sys
 import os
 
+
+logger = DeepTalkLogger(__name__)
 
 class ASDDetectorFactory:
     def __init__(self, type: str, **kwargs):
@@ -32,6 +35,7 @@ class ASDDetectorFactory:
 
                 from speaker_detector.talknet import TalkNetSpeakerDetector
                 detector = TalkNetSpeakerDetector(**self.kwargs)
+                logger.info("use TalkNet-ASD model")
                 return detector
             elif self.type == 'LoCoNet':
                 pass
@@ -47,6 +51,7 @@ class ASDDetectorFactory:
 
                 from speaker_detector.lightasd import LightASDSpeakerDetector
                 detector = LightASDSpeakerDetector(**self.kwargs)
+                logger.info("use Light-ASD model")
                 return detector
             elif self.type == 'LR-ASD':
                 # 获取当前文件的路径
@@ -58,6 +63,7 @@ class ASDDetectorFactory:
 
                 from speaker_detector.lrasd import LRASDSpeakerDetector
                 detector = LRASDSpeakerDetector(**self.kwargs)
+                logger.info("use LR-ASD model")
                 return detector
         except Exception as e:
             traceback.print_exc()
