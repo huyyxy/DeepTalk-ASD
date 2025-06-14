@@ -167,7 +167,7 @@ class LRASDSpeakerDetector:
         # # # Add batch and sequence dimensions
         # # face_tensor = face_tensor.unsqueeze(0).unsqueeze(0).to(self.device)
         # return videoFeature
-        # 提取口部图像部分
+        # 未来提取人脸图像中嘴巴部分
         mouth_imgs = [frame[0] for frame in face_frames]
 
         # 根据提取的口部图像创建 NumPy 数组
