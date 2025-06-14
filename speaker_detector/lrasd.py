@@ -1,10 +1,9 @@
 import os
 import torch
 import numpy as np
-import torch.nn.functional as F
 from collections import deque, defaultdict
 import time
-from LR_ASD.ASD import ASD
+from speaker_detector.LR_ASD_Inference import ASDInference
 import cv2
 import math
 import python_speech_features
@@ -29,9 +28,9 @@ class LRASDSpeakerDetector:
         
         # Set model path
         model_path = kwargs.get('model_path', 'LR_ASD/weight/finetuning_TalkSet.model')
-        self.model = ASD()
+        self.model = ASDInference(device=self.device)
         self.model.loadParameters(model_path)
-        self.model.eval()
+        # self.model.eval()
 
         # self.model = self._load_model(model_path)
         # self.model.eval()
@@ -222,13 +221,14 @@ class LRASDSpeakerDetector:
                 scores = []
                 with torch.no_grad():
                     for i in range(batchSize):
-                        inputA = torch.FloatTensor(audio_features[i * duration * audio_feature_rate:(i+1) * duration * audio_feature_rate,:]).unsqueeze(0).to(self.device)
-                        inputV = torch.FloatTensor(video_features[i * duration * self.video_frame_rate: (i+1) * duration * self.video_frame_rate,:,:]).unsqueeze(0).to(self.device)
-                        embedA = self.model.model.forward_audio_frontend(inputA)
-                        embedV = self.model.model.forward_visual_frontend(inputV)
-                        out = self.model.model.forward_audio_visual_backend(embedA, embedV)
+                        inputA = torch.FloatTensor(audio_features[i * duration * audio_feature_rate:(i+1) * duration * audio_feature_rate,:]).unsqueeze(0)
+                        inputV = torch.FloatTensor(video_features[i * duration * self.video_frame_rate: (i+1) * duration * self.video_frame_rate,:,:]).unsqueeze(0)
+                        # embedA = self.model.model.forward_audio_frontend(inputA)
+                        # embedV = self.model.model.forward_visual_frontend(inputV)
+                        # out = self.model.model.forward_audio_visual_backend(embedA, embedV)
                         
-                        score = self.model.lossAV.forward(out, labels = None)
+                        # score = self.model.lossAV.forward(out, labels = None)
+                        score = self.model.inference(inputA, inputV)
                         scores.extend(score)
                 allScore.append(scores)
             allScore = np.round((np.mean(np.array(allScore), axis = 0)), 1).astype(float)

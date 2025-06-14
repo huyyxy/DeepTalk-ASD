@@ -6,7 +6,8 @@ from collections import deque, defaultdict
 import time
 # from TalkNet_ASD.model.talkNetModel import talkNetModel
 # from TalkNet_ASD.loss import lossAV, lossA, lossV
-from TalkNet_ASD.talkNet import talkNet
+# from TalkNet_ASD.talkNet import talkNet
+from speaker_detector.TakNet_Inference import ASDInference
 import cv2
 import math
 import python_speech_features
@@ -30,10 +31,11 @@ class TalkNetSpeakerDetector:
         self.device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         
         # Set model path
-        model_path = kwargs.get('model_path', 'TalkNet_ASD/pretrain_TalkSet.model')
-        self.model = talkNet()
+        model_path = kwargs.get('model_path', 'TalkNet_ASD/pretrain_AVA.model')
+        # self.model = talkNet()
+        self.model = ASDInference()
         self.model.loadParameters(model_path)
-        self.model.eval()
+        # self.model.eval()
 
         # self.model = self._load_model(model_path)
         # self.model.eval()
@@ -222,13 +224,14 @@ class TalkNetSpeakerDetector:
                 scores = []
                 with torch.no_grad():
                     for i in range(batchSize):
-                        inputA = torch.FloatTensor(audio_features[i * duration * audio_feature_rate:(i+1) * duration * audio_feature_rate,:]).unsqueeze(0).to(self.device)
-                        inputV = torch.FloatTensor(video_features[i * duration * self.video_frame_rate: (i+1) * duration * self.video_frame_rate,:,:]).unsqueeze(0).to(self.device)
-                        embedA = self.model.model.forward_audio_frontend(inputA)
-                        embedV = self.model.model.forward_visual_frontend(inputV)	
-                        embedA, embedV = self.model.model.forward_cross_attention(embedA, embedV)
-                        out = self.model.model.forward_audio_visual_backend(embedA, embedV)
-                        score = self.model.lossAV.forward(out, labels = None)
+                        inputA = torch.FloatTensor(audio_features[i * duration * audio_feature_rate:(i+1) * duration * audio_feature_rate,:]).unsqueeze(0)
+                        inputV = torch.FloatTensor(video_features[i * duration * self.video_frame_rate: (i+1) * duration * self.video_frame_rate,:,:]).unsqueeze(0)
+                        # embedA = self.model.model.forward_audio_frontend(inputA)
+                        # embedV = self.model.model.forward_visual_frontend(inputV)	
+                        # embedA, embedV = self.model.model.forward_cross_attention(embedA, embedV)
+                        # out = self.model.model.forward_audio_visual_backend(embedA, embedV)
+                        # score = self.model.lossAV.forward(out, labels = None)
+                        score = self.model.inference(inputA, inputV)
                         scores.extend(score)
                 allScore.append(scores)
             allScore = np.round((np.mean(np.array(allScore), axis = 0)), 1).astype(float)
@@ -253,7 +256,7 @@ class TalkNetSpeakerDetector:
             # results[track_id] = (score, current_time)
 
         print(f"allScores ======> {allScores}")
-        self.reset()
+        # self.reset()
         return allScores
     
     def reset(self):
