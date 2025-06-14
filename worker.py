@@ -73,7 +73,10 @@ def proc(input_queue: queue.Queue, stop_event: threading.Event, config: dict):
                     asd_detector.reset()
                 asd_detector.append_audio(audio_chunk, create_time)
                 if vad_type == 4:
+                    start_evaluate_time = time.perf_counter()
                     asd_detector.evaluate()
+                    end_evaluate_time = time.perf_counter()
+                    logger.info(f"ASD Detector cost time {(end_evaluate_time - start_evaluate_time):.3f} s")
                 pass
     except Exception as e:
         logger.error(f"proc Error: {e}")
