@@ -14,7 +14,7 @@ logger = DeepTalkLogger(__name__)
 MAX_SILENCE_DURATION = 0.52
 
 
-def proc(input_queue: queue.Queue, stop_event: threading.Event, config: dict):
+def proc(input_queue: queue.Queue, output_queue: queue.Queue, stop_event: threading.Event, config: dict):
     asd_model_type = config.get('asd_model_type', 'LR-ASD')
     video_fps = config.get('video_fps', 25)
     audio_sample_rate = config.get('audio_sample_rate', 16000)
@@ -74,9 +74,15 @@ def proc(input_queue: queue.Queue, stop_event: threading.Event, config: dict):
                 asd_detector.append_audio(audio_chunk, create_time)
                 if vad_type == 4:
                     start_evaluate_time = time.perf_counter()
-                    asd_detector.evaluate()
+                    all_face_scores = asd_detector.evaluate()
                     end_evaluate_time = time.perf_counter()
                     logger.info(f"ASD Detector cost time {(end_evaluate_time - start_evaluate_time):.3f} s")
+                    score_info = {
+                        "type": "score",
+                        "create_time": create_time,
+                        "scores": all_face_scores
+                    }
+                    output_queue.put_nowait(score_info)
                 pass
     except Exception as e:
         logger.error(f"proc Error: {e}")

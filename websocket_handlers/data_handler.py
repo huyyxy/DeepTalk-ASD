@@ -58,7 +58,7 @@ class DataWebSocketHandler(tornado.websocket.WebSocketHandler):
         create_time = json_message.get('create_time')
         if type == 'init':
             config = json_message
-            self.worker_thread.submit(proc, self.input_queue, self.stop_event, config)
+            self.worker_thread.submit(proc, self.input_queue, self.output_queue, self.stop_event, config)
             pass
         elif type == 'video':
             self.input_queue.put(json_message)
