@@ -12,7 +12,6 @@ FPS = 15
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
 FPS = 25
-CAMERA_INDEX = 0
 
 
 class Cv2Capture:

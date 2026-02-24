@@ -9,28 +9,41 @@ import math
 import python_speech_features
 from utils.image_helper import save_image_to_tmp
 
+try:
+    import onnxruntime as ort
+    _HAS_ONNXRUNTIME = True
+except ImportError:
+    _HAS_ONNXRUNTIME = False
+
 
 class LRASDSpeakerDetector:
-    """Active Speaker Detection using TalkNet model"""
+    """Active Speaker Detection using LR-ASD model (PyTorch 或 ONNX 推理)"""
     
     def __init__(self, **kwargs):
         """
-        Initialize the TalkNet speaker detector.
+        Initialize the LR-ASD speaker detector.
         
         Args:
-            model_path (str, optional): Path to pretrained TalkNet model weights
-            device (str): Device to run the model on ('cuda' or 'cpu')
+            model_path (str): 预训练权重路径，支持 .model (PyTorch) 或 .onnx (ONNX)
+            device (str): 运行设备 ('cuda' 或 'cpu')，ONNX 时由 provider 控制
         """
         self.video_frame_rate = kwargs.get('video_frame_rate', 25)
         self.audio_sample_rate = kwargs.get('audio_sample_rate', 16000)
-        # Get device from kwargs or use default
         self.device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
-        
-        # Set model path
         model_path = kwargs.get('model_path', 'LR_ASD/weight/finetuning_TalkSet.model')
-        self.model = ASDInference(device=self.device)
-        self.model.loadParameters(model_path)
-        # self.model.eval()
+
+        self._use_onnx = isinstance(model_path, str) and model_path.endswith('.onnx')
+        if self._use_onnx:
+            if not _HAS_ONNXRUNTIME:
+                raise ImportError("使用 ONNX 推理需要安装 onnxruntime: pip install onnxruntime 或 onnxruntime-gpu")
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider'] if self.device == 'cuda' else ['CPUExecutionProvider']
+            self.model = ort.InferenceSession(str(model_path), providers=providers)
+            self._onnx_input_audio = self.model.get_inputs()[0].name
+            self._onnx_input_visual = self.model.get_inputs()[1].name
+            self._onnx_output = self.model.get_outputs()[0].name
+        else:
+            self.model = ASDInference(device=self.device)
+            self.model.loadParameters(model_path)
 
         # self.model = self._load_model(model_path)
         # self.model.eval()
@@ -199,7 +212,8 @@ class LRASDSpeakerDetector:
         
         audio_features = self._preprocess_audio()
         
-        durationSet = {1,1,1,2,2,2,3,3,4,5,6}
+        # durationSet = {1,2,4,6} # To make the result more reliable
+        durationSet = {1,1,1,2,2,2,3,3,4,5,6} # Use this line can get more reliable result
         # Process each track
         for track_id, face_frames in list(self.video_buffer.items()):
             if not face_frames:
@@ -221,15 +235,27 @@ class LRASDSpeakerDetector:
                 scores = []
                 with torch.no_grad():
                     for i in range(batchSize):
+                        start_time = time.perf_counter()
+                        print(f"i({i}) * duration({duration}) ======> {i * duration}")
                         inputA = torch.FloatTensor(audio_features[i * duration * audio_feature_rate:(i+1) * duration * audio_feature_rate,:]).unsqueeze(0)
                         inputV = torch.FloatTensor(video_features[i * duration * self.video_frame_rate: (i+1) * duration * self.video_frame_rate,:,:]).unsqueeze(0)
-                        # embedA = self.model.model.forward_audio_frontend(inputA)
-                        # embedV = self.model.model.forward_visual_frontend(inputV)
-                        # out = self.model.model.forward_audio_visual_backend(embedA, embedV)
-                        
-                        # score = self.model.lossAV.forward(out, labels = None)
-                        score = self.model.inference(inputA, inputV)
+                        end1_time = time.perf_counter()
+                        if self._use_onnx:
+                            # ONNX 输入: audio [1, 13, T], visual [1, T, 112, 112]
+                            inputA_np = inputA.numpy().astype(np.float32).transpose(0, 2, 1)
+                            inputV_np = inputV.numpy().astype(np.float32)
+                            out = self.model.run(
+                                [self._onnx_output],
+                                {self._onnx_input_audio: inputA_np, self._onnx_input_visual: inputV_np},
+                            )
+                            score = out[0].flatten().tolist()
+                        else:
+                            score = self.model.inference(inputA, inputV)
+                        end2_time = time.perf_counter()
                         scores.extend(score)
+                        end3_time = time.perf_counter()
+
+                        print(f"evaluate once cost time ({end1_time - start_time} s, {end2_time - end1_time} s, {end3_time - end2_time} s), total time {end3_time - start_time} s")
                 allScore.append(scores)
             allScore = np.round((np.mean(np.array(allScore), axis = 0)), 1).astype(float)
             # s = allScore[max(fidx - 2, 0): min(fidx + 3, len(allScore) - 1)] # average smoothing

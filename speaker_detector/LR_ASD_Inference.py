@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, Tuple
 import torch
 import torch.nn as nn
 import sys
@@ -6,6 +6,29 @@ from pathlib import Path
 import numpy as np
 from LR_ASD.loss import lossAV, lossV  # 导入自定义的损失函数
 from LR_ASD.model.Model import ASD_Model  # 导入ASD模型结构
+
+
+class ASDInferenceForONNX(nn.Module):
+    """
+    仅包含推理计算的子图，用于导出 ONNX（不含 .numpy() 等不可导/设备相关操作）。
+    输入: audioFeature [B, A, T], visualFeature [B, T, H, W]
+    输出: score [B*T] 或 [N]，表示每帧的说话人分数（正类 logit 或概率）。
+    """
+    def __init__(self, asd_model: ASD_Model, loss_av: lossAV):
+        super().__init__()
+        self.model = asd_model
+        self.lossAV = loss_av
+
+    def forward(self, audioFeature: torch.Tensor, visualFeature: torch.Tensor) -> torch.Tensor:
+        audioEmbed = self.model.forward_audio_frontend(audioFeature)
+        visualEmbed = self.model.forward_visual_frontend(visualFeature)
+        outsAV = self.model.forward_audio_visual_backend(audioEmbed, visualEmbed)
+        # 推理分支：只做 FC + 取正类分数，保持为 tensor
+        x = outsAV.squeeze(1)
+        x = self.lossAV.FC(x)
+        score = x[:, 1]
+        score = score.view(-1)
+        return score
 
 
 class ASDInference(nn.Module):
@@ -105,3 +128,56 @@ class ASDInference(nn.Module):
             
         except Exception as e:
             raise RuntimeError(f"加载模型参数时出错: {str(e)}") from e
+
+    def export_onnx(
+        self,
+        path: Union[str, Path],
+        *,
+        audio_time_steps: int = 100,
+        video_time_steps: int = 25,
+        audio_ceps: int = 13,
+        visual_h: int = 112,
+        visual_w: int = 112,
+        opset_version: int = 14,
+        dynamic: bool = True,
+    ) -> None:
+        """
+        将当前模型导出为 ONNX，便于用 onnxruntime 等做推理。
+
+        Args:
+            path: 输出 .onnx 文件路径
+            audio_time_steps: 导出时音频时间步（动态时可为任意）
+            video_time_steps: 导出时视频帧数（动态时可为任意）
+            audio_ceps: MFCC 维度，默认 13
+            visual_h, visual_w: 口部图像高宽，默认 112
+            opset_version: ONNX opset 版本
+            dynamic: 是否对时间维使用动态轴（推荐 True）
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        wrapper = ASDInferenceForONNX(self.model, self.lossAV)
+        wrapper.eval()
+
+        B = 1
+        dummy_audio = torch.randn(B, audio_ceps, audio_time_steps, device=self.device)
+        dummy_visual = torch.randn(B, video_time_steps, visual_h, visual_w, device=self.device)
+
+        dynamic_axes = None
+        if dynamic:
+            dynamic_axes = {
+                "audioFeature": {0: "batch", 2: "audio_time"},
+                "visualFeature": {0: "batch", 1: "video_time"},
+                "score": {0: "num_frames"},
+            }
+
+        with torch.no_grad():
+            torch.onnx.export(
+                wrapper,
+                (dummy_audio, dummy_visual),
+                str(path),
+                input_names=["audioFeature", "visualFeature"],
+                output_names=["score"],
+                dynamic_axes=dynamic_axes,
+                opset_version=opset_version,
+            )

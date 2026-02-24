@@ -14,7 +14,7 @@ import time
 
 
 # Configurations
-ASD_WS_URL = os.getenv('ASD_WS_URL', 'ws://192.168.20.187:7900/data')
+ASD_WS_URL = os.getenv('ASD_WS_URL', 'ws://127.0.0.1:7900/data')
 
 CAMERA_INDEX = 0
 MIC_DEVICE_NAME = os.getenv('MIC_DEVICE_NAME', 'MacBook Pro麦克风')
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda signum, frame: signal_handler(signum, frame, stop_event, face_info_client, speech_client, websocket_client))
 
-    face_info_main_executor.submit(face_info_client.capture_run, stop_event)
+    face_info_main_executor.submit(face_info_client.capture_run, stop_event, CAMERA_INDEX)
     speech_main_executor.submit(speech_client.mic_run, stop_event)
 
     try:

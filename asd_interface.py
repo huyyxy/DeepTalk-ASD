@@ -14,7 +14,7 @@ class ASDInterface:
     
     def append_video(self, frame_faces, create_time = None):
         """
-        添加视频帧中已检测的人脸信息，视频帧率为30
+        添加视频帧中已检测的人脸信息，视频帧率缺省为25
 
         参数:
             frame_faces: 当前帧的人脸检测结果列表，每个元素为字典:
