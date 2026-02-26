@@ -186,7 +186,7 @@ class AudioCaptureThread(threading.Thread):
             dev_info = pa.get_device_info_by_index(i)
             if dev_info["maxInputChannels"] > 0:
                 marker = " <-- 当前" if self._device_index is not None and i == self._device_index else ""
-                if self._device_index is None and i == pa.get_default_input_device_index():
+                if self._device_index is None and i == pa.get_default_input_device_info()['index']:
                     marker = " <-- 缺省"
                 print(f"  [{i}] {dev_info['name']} (输入通道: {dev_info['maxInputChannels']}){marker}")
         print("---\n")

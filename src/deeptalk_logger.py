@@ -8,7 +8,7 @@ class ColoredFormatter(logging.Formatter):
         "INFO": "green",
         "WARNING": "yellow",
         "ERROR": "red",
-        "CRITICAL": "red",
+        "CRITICAL": "cyan",
     }
 
     def format(self, record):

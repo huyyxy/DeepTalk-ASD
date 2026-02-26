@@ -108,6 +108,8 @@ class ASD(ASDInterface):
 
         # 2. TurnDetector 进行 VAD 轮次检测
         utterance = self._turn_detector.detect(audio_frame)
+        if utterance.turn_state in [TurnState.TURN_START, TurnState.TURN_CONFIRMED, TurnState.TURN_END, TurnState.TURN_REJECTED]:
+            logger.critical(f"Utterance: {utterance.turn_state}")
         return utterance
 
     def evaluate(self):
