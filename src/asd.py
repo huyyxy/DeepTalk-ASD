@@ -77,6 +77,8 @@ class ASD(ASDInterface):
                     face_gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
                 else:
                     face_gray = face_image
+                    face_gray = cv2.resize(face_gray, (224, 224))
+                    face_gray = face_gray[56:168, 56:168]  # 中心裁剪 112x112
                 frame_faces.append({
                     'id': profile.track_id,
                     'image': face_gray,
