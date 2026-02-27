@@ -92,7 +92,7 @@ asd = factory.create()
 The code in this project is licensed under the **MIT License**. However, please note that the integrated models and their related code are subject to their respective licenses:
 
 1. **InspireFace**: Core code is MIT, but the provided pre-trained models are typically restricted to **non-commercial research use**. For commercial use, please refer to [InsightFace](https://github.com/deepinsight/insightface) documentation.
-2. **Silero VAD**: Licensed under the **MIT License**.
-3. **LR-ASD**: Licensed under the **MIT License**.
+2. **Silero VAD**: Licensed under the **MIT License**. Please refer to [Silero VAD](https://github.com/snakers4/silero-vad).
+3. **LR-ASD**: Licensed under the **MIT License**. Please refer to [LR-ASD](https://github.com/Junhua-Liao/LR-ASD).
 
 While you may redistribute the code of this project under the MIT license, you must explicitly inform users in the documentation that: **When using specific pre-trained models (especially face detection models), users must comply with the non-commercial restrictions of the original authors.** If commercialization is required, users should replace them with commercially-friendly models or contact the original authors for authorization.

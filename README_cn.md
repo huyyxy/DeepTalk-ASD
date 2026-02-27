@@ -91,7 +91,7 @@ asd = factory.create()
 本项目代码部分遵循 **MIT 许可证**。但请注意，本项目集成的各个模型及其相关代码需遵循其各自的许可证：
 
 1. **InspireFace**: 核心代码遵循 MIT，但其提供的训练模型通常仅限于 **非商业研究用途**。商业使用请参考 [InsightFace](https://github.com/deepinsight/insightface) 相关说明。
-2. **Silero VAD**: 遵循 **MIT 许可证**。
-3. **LR-ASD**: 遵循 **MIT 许可证**。
+2. **Silero VAD**: 遵循 **MIT 许可证**。请参考 [Silero VAD](https://github.com/snakers4/silero-vad) 相关说明。
+3. **LR-ASD**: 遵循 **MIT 许可证**。请参考 [LR-ASD](https://github.com/Junhua-Liao/LR-ASD) 相关说明。
 
 您可以基于 MIT 许可证发布本项目的代码，但必须在文档中明确告知用户：**在使用特定的预训练模型（尤其是人脸检测相关模型）时，必须遵守原作者的非商业性限制。** 如果用户需要商业化，则需要更换为商业友好的模型或联系原作者获取授权。
