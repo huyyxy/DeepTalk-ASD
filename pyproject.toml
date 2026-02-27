@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deeptalk-asd"
+version = "0.1.0"
+description = "DeepTalk Active Speaker Detection"
+requires-python = ">=3.8"
+dependencies = [
+    "python-dotenv",
+    "termcolor",
+    "tornado",
+    "python_speech_features",
+    "numpy==1.26.4",
+    "opencv-python",
+    "scipy",
+    "pandas",
+    "tqdm",
+]
