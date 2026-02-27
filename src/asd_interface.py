@@ -36,9 +36,16 @@ class ASDInterface:
         """
         pass
     
-    def evaluate(self):
+    def evaluate(self, start_time: float = None, end_time: float = None):
         """
         评估当前活动说话者，一般是前置VAD检测发现结束说话时调用
+        
+        参数:
+            start_time: 评估起始时间（time.perf_counter 时间戳），可选
+            end_time: 评估结束时间（time.perf_counter 时间戳），可选
+            若均提供，则只对该时间范围内的音视频做推理；
+            若时间范围超过缓冲区长度，则回退为使用整个缓冲区。
+            若不传，则使用整个缓冲区。
         
         返回:
             最新时间点的活动说话者的tracker_id和置信度得分

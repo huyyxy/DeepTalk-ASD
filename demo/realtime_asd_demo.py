@@ -238,8 +238,10 @@ class AudioCaptureThread(threading.Thread):
 
                 if utterance is not None and utterance.turn_state == TurnState.TURN_END:
                     # VAD 检测到说话结束，评估活动说话者
-                    start_val = time.perf_counter(  )
-                    speaker_scores = self._asd.evaluate()
+                    start_val = time.perf_counter()
+                    eval_end = create_time
+                    eval_start = eval_end - utterance.duration_seconds()
+                    speaker_scores = self._asd.evaluate(eval_start, eval_end)
                     end_val = time.perf_counter()
                     if speaker_scores:
                         self._state_tracker.update_speakers(speaker_scores)

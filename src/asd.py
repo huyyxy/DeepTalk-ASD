@@ -112,15 +112,19 @@ class ASD(ASDInterface):
             logger.critical(f"Utterance: {utterance.turn_state.name}")
         return utterance
 
-    def evaluate(self):
+    def evaluate(self, start_time: float = None, end_time: float = None):
         """
         评估当前活动说话者
+
+        参数:
+            start_time: 评估起始时间（time.perf_counter 时间戳），可选
+            end_time: 评估结束时间（time.perf_counter 时间戳），可选
 
         返回:
             最新时间点的活动说话者的 track_id 和置信度得分
             格式: {track_id: score, ...}
         """
-        return self._speaker_detector.evaluate()
+        return self._speaker_detector.evaluate(start_time, end_time)
 
     def reset(self):
         """重置系统状态"""

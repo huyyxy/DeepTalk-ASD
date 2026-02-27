@@ -109,6 +109,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             audio_chunk = np.frombuffer(audio_chunk, dtype=np.int16)
 
         self.audio_buffer.extend(audio_chunk)
+        self.last_audio_timestamp = create_time
 
     def _cleanup_old_tracks(self):
         """Remove tracks that haven't been updated recently."""
@@ -123,9 +124,10 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             if track_id in self.last_face_timestamps:
                 del self.last_face_timestamps[track_id]
 
-    def _preprocess_audio(self):
+    def _preprocess_audio(self, audio_data=None):
         """Convert raw audio buffer to MFCC features."""
-        audio_data = np.array(list(self.audio_buffer), dtype=np.int16)
+        if audio_data is None:
+            audio_data = np.array(list(self.audio_buffer), dtype=np.int16)
 
         mfcc = python_speech_features.mfcc(
             audio_data,
@@ -163,9 +165,16 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
 
         return scores
 
-    def evaluate(self):
+    def evaluate(self, start_time: float = None, end_time: float = None):
         """
         评估当前活动说话者（多时长滑窗推理，参考 demo_onnx.py 的 run_multi_duration）。
+
+        Args:
+            start_time: 评估起始时间（time.perf_counter 时间戳），可选
+            end_time: 评估结束时间（time.perf_counter 时间戳），可选
+            若均提供，则只对该时间范围内的音视频做推理；
+            若时间范围超过缓冲区长度，则回退为使用整个缓冲区。
+            若不传，则使用整个缓冲区。
 
         Returns:
             dict: track_id -> average score (正数=说话, 负数=未说话)
@@ -173,7 +182,28 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         if not self.audio_buffer or not self.video_buffer:
             return {}
 
-        audio_features = self._preprocess_audio()
+        effective_start = None
+        effective_end = None
+
+        if start_time is not None and end_time is not None:
+            buf_len = len(self.audio_buffer)
+            buffer_duration = buf_len / self.audio_sample_rate
+            buffer_end_time = self.last_audio_timestamp
+            buffer_start_time = buffer_end_time - buffer_duration
+
+            if end_time - start_time <= buffer_duration:
+                effective_start = max(start_time, buffer_start_time)
+                effective_end = min(end_time, buffer_end_time)
+
+                start_idx = max(0, int((effective_start - buffer_start_time) * self.audio_sample_rate))
+                end_idx = min(buf_len, int((effective_end - buffer_start_time) * self.audio_sample_rate))
+
+                audio_data = np.array(list(self.audio_buffer)[start_idx:end_idx], dtype=np.int16)
+                audio_features = self._preprocess_audio(audio_data)
+
+        if effective_start is None:
+            audio_features = self._preprocess_audio()
+
         audio_feature_rate = int(1.0 / self.audio_stride)  # 100
 
         duration_set = [1, 2]
@@ -186,7 +216,14 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             if not face_frames:
                 continue
 
-            video_features = self._preprocess_video(face_frames)
+            if effective_start is not None:
+                filtered_frames = [(f, t) for f, t in face_frames
+                                   if effective_start <= t <= effective_end]
+                if not filtered_frames:
+                    continue
+                video_features = self._preprocess_video(filtered_frames)
+            else:
+                video_features = self._preprocess_video(face_frames)
 
             # 计算对齐后的有效长度（秒）
             length = min(
@@ -229,9 +266,9 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                         )
                     audio_chunk = audio_chunk[:target_a_len, :]
 
-                    start_time = time.perf_counter()
+                    t0 = time.perf_counter()
                     chunk_scores = self._run_inference(audio_chunk, video_chunk)
-                    elapsed = time.perf_counter() - start_time
+                    elapsed = time.perf_counter() - t0
                     logger.debug(f"[LR-ASD-ONNX] inference chunk cost {elapsed:.4f}s")
 
                     scores.extend(chunk_scores.flatten().tolist())
