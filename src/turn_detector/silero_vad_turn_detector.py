@@ -6,24 +6,25 @@ from .interface import TurnDetectorInterface
 from .utterance import Utterance, TurnState
 from .vad.silero_vad import SileroVAD
 
+from ..deeptalk_logger import DeepTalkLogger
+
+logger = DeepTalkLogger(__name__)
+
 
 class SileroVadTurnDetector(TurnDetectorInterface):
     """基于 Silero VAD 的轮次检测器
 
     状态机说明:
-        IDLE ──(voice)──> TURN_START
-        TURN_START ──(voice, 累计人声 >= min_voice_duration_ms)──> TURN_CONFIRMED
-        TURN_START ──(voice, 累计人声 < min_voice_duration_ms)──> TURN_CONTINUE
-        TURN_CONTINUE ──(voice, 累计人声 >= min_voice_duration_ms)──> TURN_CONFIRMED
-        TURN_CONFIRMED ──(voice)──> TURN_CONFIRMED
-        TURN_CONFIRMED ──(silence)──> TURN_SILENCE
-        TURN_SILENCE ──(voice)──> TURN_CONFIRMED
-        TURN_SILENCE ──(silence, 累计静音 >= silence_duration_ms)──> TURN_END / TURN_REJECTED
+        IDLE ──(silence)──> IDLE
+        IDLE ──(voice)──> TURN_START，累计人声=0，累计静音=0
+        TURN_START/TURN_CONTINUE/TURN_CONFIRMED/TURN_SILENCE ──(voice, 累计人声 >= min_voice_duration_ms首次)──> TURN_CONFIRMED，累计人声增加，累计静音=0
+        TURN_START/TURN_CONTINUE/TURN_CONFIRMED/TURN_SILENCE ──(voice，非TURN_CONFIRMED状态)──> TURN_CONTINUE，累计人声增加，累计静音=0
+        TURN_START/TURN_CONTINUE/TURN_CONFIRMED/TURN_SILENCE ──(silence，累计静音 < silence_duration_ms)──> TURN_SILENCE，累计静音增加
+        TURN_START/TURN_CONTINUE/TURN_CONFIRMED/TURN_SILENCE ──(silence，累计静音 >= silence_duration_ms，累计人声 < min_voice_duration_ms)──> TURN_REJECTED
+        TURN_START/TURN_CONTINUE/TURN_CONFIRMED/TURN_SILENCE ──(silence，累计静音 >= silence_duration_ms，累计人声 >= min_voice_duration_ms，人声段未通过 loudness_percentile_95 验证)──> TURN_REJECTED
+        TURN_START/TURN_CONTINUE/TURN_CONFIRMED/TURN_SILENCE ──(silence，累计静音 >= silence_duration_ms，累计人声 >= min_voice_duration_ms，人声段通过 loudness_percentile_95 验证)──> TURN_END
+        
         TURN_END / TURN_REJECTED ──> IDLE (自动重置)
-
-    判定结果:
-        - TURN_END: 人声段通过 loudness_percentile_95 验证
-        - TURN_REJECTED: 人声段未通过 loudness_percentile_95 验证
     """
 
     def __init__(
@@ -96,14 +97,14 @@ class SileroVadTurnDetector(TurnDetectorInterface):
 
         frame_duration_ms = audio_frame.duration_ms
 
-        # ── 上一轮结束/拒绝后，自动重置 ──
+        # ── TURN_END / TURN_REJECTED 自动重置 ──
         if self._state in (TurnState.TURN_END, TurnState.TURN_REJECTED):
             self._reset()
 
         # ── IDLE 状态 ──
         if self._state == TurnState.IDLE:
             if is_voice:
-                # 语音开始：取出前置缓冲，进入 TURN_START
+                # 语音开始：取出前置缓冲，进入 TURN_START，累计人声=0，累计静音=0
                 self._state = TurnState.TURN_START
                 self._voice_frames = list(self._prefix_buffer)
                 self._voice_frames.append(audio_frame)
@@ -129,112 +130,64 @@ class SileroVadTurnDetector(TurnDetectorInterface):
                     frames=[audio_frame],
                 )
 
-        # ── TURN_START / TURN_CONTINUE: 等待累计人声达到 min_voice_duration_ms ──
-        if self._state in (TurnState.TURN_START, TurnState.TURN_CONTINUE):
-            self._voice_frames.append(audio_frame)
+        # ── 活跃状态: TURN_START / TURN_CONTINUE / TURN_CONFIRMED / TURN_SILENCE ──
+        self._voice_frames.append(audio_frame)
 
-            if is_voice:
-                self._voice_duration_ms += frame_duration_ms
-                self._silence_duration_ms_acc = 0
+        if is_voice:
+            # 人声帧：累计人声增加，累计静音=0
+            self._voice_duration_ms += frame_duration_ms
+            self._silence_duration_ms_acc = 0
 
-                if self._voice_duration_ms >= self._min_voice_duration_ms:
-                    self._state = TurnState.TURN_CONFIRMED
-                    self._is_confirmed = True
-                    return Utterance(
-                        face_id=-1,
-                        turn_state=TurnState.TURN_CONFIRMED,
-                        frames=list(self._voice_frames),
-                    )
-                else:
-                    self._state = TurnState.TURN_CONTINUE
-                    return Utterance(
-                        face_id=-1,
-                        turn_state=TurnState.TURN_CONTINUE,
-                        frames=list(self._voice_frames),
-                    )
-            else:
-                # 在未确认阶段收到静音
-                self._silence_duration_ms_acc += frame_duration_ms
-                if self._silence_duration_ms_acc >= self._silence_duration_ms:
-                    # 未确认就超时 -> 伪语音段，拒绝
-                    result = Utterance(
-                        face_id=-1,
-                        turn_state=TurnState.TURN_REJECTED,
-                        frames=list(self._voice_frames),
-                    )
-                    self._state = TurnState.TURN_REJECTED
-                    return result
-                else:
-                    return Utterance(
-                        face_id=-1,
-                        turn_state=self._state,
-                        frames=list(self._voice_frames),
-                    )
-
-        # ── TURN_CONFIRMED: 已确认的语音段 ──
-        if self._state == TurnState.TURN_CONFIRMED:
-            self._voice_frames.append(audio_frame)
-
-            if is_voice:
-                self._voice_duration_ms += frame_duration_ms
-                self._silence_duration_ms_acc = 0
+            if not self._is_confirmed and self._voice_duration_ms >= self._min_voice_duration_ms:
+                # 首次达到 min_voice_duration_ms → TURN_CONFIRMED
+                self._state = TurnState.TURN_CONFIRMED
+                self._is_confirmed = True
                 return Utterance(
                     face_id=-1,
                     turn_state=TurnState.TURN_CONFIRMED,
                     frames=list(self._voice_frames),
                 )
             else:
-                # 进入静音检测阶段
-                self._silence_duration_ms_acc = frame_duration_ms
+                # 非首次确认 → TURN_CONTINUE
+                self._state = TurnState.TURN_CONTINUE
+                return Utterance(
+                    face_id=-1,
+                    turn_state=TurnState.TURN_CONTINUE,
+                    frames=list(self._voice_frames),
+                )
+        else:
+            # 静音帧：累计静音增加
+            self._silence_duration_ms_acc += frame_duration_ms
+
+            if self._silence_duration_ms_acc < self._silence_duration_ms:
+                # 静音未超时 → TURN_SILENCE
                 self._state = TurnState.TURN_SILENCE
                 return Utterance(
                     face_id=-1,
                     turn_state=TurnState.TURN_SILENCE,
                     frames=list(self._voice_frames),
                 )
-
-        # ── TURN_SILENCE: 确认后的静音段 ──
-        if self._state == TurnState.TURN_SILENCE:
-            self._voice_frames.append(audio_frame)
-
-            if is_voice:
-                # 静音被打断，回到 CONFIRMED
-                self._voice_duration_ms += frame_duration_ms
-                self._silence_duration_ms_acc = 0
-                self._state = TurnState.TURN_CONFIRMED
+            elif self._voice_duration_ms < self._min_voice_duration_ms:
+                # 静音超时 + 累计人声不足 → TURN_REJECTED
+                self._state = TurnState.TURN_REJECTED
+                logger.warning("TURN_REJECTED: 静音超时 + 累计人声不足")
                 return Utterance(
                     face_id=-1,
-                    turn_state=TurnState.TURN_CONFIRMED,
+                    turn_state=TurnState.TURN_REJECTED,
                     frames=list(self._voice_frames),
                 )
             else:
-                self._silence_duration_ms_acc += frame_duration_ms
-                if self._silence_duration_ms_acc >= self._silence_duration_ms:
-                    # 静音超时 -> 结束语音段
-                    utterance = Utterance(
-                        face_id=-1,
-                        turn_state=TurnState.TURN_END,
-                        frames=list(self._voice_frames),
-                    )
-                    # 响度验证
-                    loudness = utterance.get_loudness_percentile_95()
-                    if loudness < self._abs_amplitude_threshold:
-                        utterance.turn_state = TurnState.TURN_REJECTED
-                        self._state = TurnState.TURN_REJECTED
-                    else:
-                        self._state = TurnState.TURN_END
-
-                    return utterance
+                # 静音超时 + 累计人声足够 → 响度验证
+                utterance = Utterance(
+                    face_id=-1,
+                    turn_state=TurnState.TURN_END,
+                    frames=list(self._voice_frames),
+                )
+                loudness = utterance.get_loudness_percentile_95()
+                if loudness < self._abs_amplitude_threshold:
+                    utterance.turn_state = TurnState.TURN_REJECTED
+                    logger.warning("TURN_REJECTED: 响度验证失败")
+                    self._state = TurnState.TURN_REJECTED
                 else:
-                    return Utterance(
-                        face_id=-1,
-                        turn_state=TurnState.TURN_SILENCE,
-                        frames=list(self._voice_frames),
-                    )
-
-        # 兜底（不应到达）
-        return Utterance(
-            face_id=-1,
-            turn_state=self._state,
-            frames=[audio_frame],
-        )
+                    self._state = TurnState.TURN_END
+                return utterance
