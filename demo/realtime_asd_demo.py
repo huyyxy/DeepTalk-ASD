@@ -99,6 +99,10 @@ def parse_args():
         "--vad-model-path", type=str, default=None,
         help="VAD 模型文件路径 (可选)"
     )
+    parser.add_argument(
+        "--abs-amplitude-threshold", type=float, default=0.01,
+        help="绝对振幅阈值，低于此值的音频段将被拒绝 (默认: 0.01)"
+    )
 
     return parser.parse_args()
 
@@ -234,10 +238,12 @@ class AudioCaptureThread(threading.Thread):
 
                 if utterance is not None and utterance.turn_state == TurnState.TURN_END:
                     # VAD 检测到说话结束，评估活动说话者
+                    start_val = time.perf_counter(  )
                     speaker_scores = self._asd.evaluate()
+                    end_val = time.perf_counter()
                     if speaker_scores:
                         self._state_tracker.update_speakers(speaker_scores)
-                        print(f"[ASD] 说话者评估结果: {speaker_scores}")
+                        print(f"[ASD] 说话者评估结果: {speaker_scores}, 耗时: {end_val - start_val}")
 
         except Exception as e:
             print(f"[错误] 音频线程异常: {e}")
@@ -335,6 +341,7 @@ def create_asd(args):
     turn_detector_config = {
         "type": args.turn_detector,
         "model_path": vad_model_path,
+        "abs_amplitude_threshold": args.abs_amplitude_threshold,
     }
 
     # 说话者检测器配置

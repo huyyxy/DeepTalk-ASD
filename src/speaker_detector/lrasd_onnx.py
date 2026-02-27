@@ -176,7 +176,10 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         audio_features = self._preprocess_audio()
         audio_feature_rate = int(1.0 / self.audio_stride)  # 100
 
-        duration_set = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6]
+        duration_set = [1, 2]
+        # duration_set = [1, 2, 4, 6]
+        # duration_set = [1, 2, 3, 4, 5, 6]
+        # duration_set = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6]  # To make the result more reliable
         all_scores = {}
 
         for track_id, face_frames in list(self.video_buffer.items()):

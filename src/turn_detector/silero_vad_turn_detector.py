@@ -35,7 +35,7 @@ class SileroVadTurnDetector(TurnDetectorInterface):
         prefix_padding_ms: int = 300,
         min_voice_duration_ms: int = 200,
         silence_duration_ms: int = 500,
-        abs_amplitude_threshold: float = 0.02,
+        abs_amplitude_threshold: float = 0.01,
     ):
         """初始化 SileroVadTurnDetector
 
@@ -186,7 +186,7 @@ class SileroVadTurnDetector(TurnDetectorInterface):
                 loudness = utterance.get_loudness_percentile_95()
                 if loudness < self._abs_amplitude_threshold:
                     utterance.turn_state = TurnState.TURN_REJECTED
-                    logger.warning("TURN_REJECTED: 响度验证失败")
+                    logger.warning(f"TURN_REJECTED: 响度验证失败({loudness} < {self._abs_amplitude_threshold})")
                     self._state = TurnState.TURN_REJECTED
                 else:
                     self._state = TurnState.TURN_END
