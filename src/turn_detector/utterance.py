@@ -56,6 +56,17 @@ class Utterance:
         """
         return self.frames[0].samples_per_channel
 
+    def duration_seconds(self) -> float:
+        """
+        计算语音段的时长（秒）。
+        即所有帧的每声道样本数之和除以采样率。
+        无帧时返回 0.0。
+        """
+        if not self.frames:
+            return 0.0
+        total_samples = sum(f.samples_per_channel for f in self.frames)
+        return total_samples / self.sample_rate
+
     def get_loudness_percentile_95(self) -> float:
         """
         计算该语音段的95分位音量。
