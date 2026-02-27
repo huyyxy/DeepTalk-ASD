@@ -86,7 +86,7 @@ class VisualFrontend(nn.Module):
 
 
 class AVBackend(nn.Module):
-    """音视频后端：音频嵌入 + 视觉嵌入 -> 说话人分数"""
+    """音视频后端：音频嵌入 + 视觉嵌入 -> 说话人 logit（与原始 LR-ASD 一致，不做 softmax；>0 判为说话）"""
 
     def __init__(self, fusion, detector, fc):
         super().__init__()
@@ -100,8 +100,7 @@ class AVBackend(nn.Module):
         x = self.detector(x)  # (B, T, 128)
         x = torch.reshape(x, (-1, 128))  # (B*T, 128)
         x = self.fc(x)  # (B*T, 2)
-        x = F.softmax(x, dim=-1)  # (B*T, 2)
-        return x[:, 1]  # (B*T,) 说话概率
+        return x[:, 1]  # (B*T,) 说话 logit，与原始 LR-ASD 一致；>0 判为说话
 
 
 def load_model(weight_path, device):
@@ -234,7 +233,7 @@ def verify_with_onnxruntime(model, loss_av, onnx_paths, device, num_frames):
         pt_audio_embed = model.forward_audio_frontend(audio_input)
         pt_visual_embed = model.forward_visual_frontend(visual_input)
         pt_av_out = model.forward_audio_visual_backend(pt_audio_embed, pt_visual_embed)
-        pt_score = F.softmax(loss_av.FC(pt_av_out), dim=-1)[:, 1]
+        pt_score = loss_av.FC(pt_av_out)[:, 1]  # logit，与导出一致
 
     audio_np = audio_input.cpu().numpy()
     visual_np = visual_input.cpu().numpy()
