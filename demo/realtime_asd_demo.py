@@ -40,6 +40,10 @@ from deeptalk_asd import ASDDetectorFactory, VideoFrame, VideoBufferType, AudioF
 # ──────────────────────────────────────────────
 AUDIO_CHUNK_MS = 30          # 每次采集的音频时长（毫秒）
 SPEAKING_PERSIST_SEC = 0.5   # 说话者绿框持续时间（秒）
+# 与 Silero VAD 一致：utterance 开头为前置静音、结尾为触发结束的静音，评估时裁掉以只用核心人声段
+EVAL_PREFIX_TRIM_SEC = 0.3   # 对应 VAD prefix_padding_ms=300
+EVAL_SUFFIX_TRIM_SEC = 0.5  # 对应 VAD silence_duration_ms=500
+EVAL_MIN_CORE_SEC = 0.4     # 裁剪后核心段最短时长，过短则不做裁剪
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.5
 FONT_THICKNESS = 1
@@ -238,9 +242,16 @@ class AudioCaptureThread(threading.Thread):
 
                 if utterance is not None and utterance.turn_state == TurnState.TURN_END:
                     # VAD 检测到说话结束，评估活动说话者
+                    # 裁掉 utterance 前后的静音段，只用“核心人声”窗口，避免静音稀释导致分数偏低
+                    full_duration = utterance.duration_seconds()
+                    core_duration = full_duration - EVAL_PREFIX_TRIM_SEC - EVAL_SUFFIX_TRIM_SEC
+                    if core_duration >= EVAL_MIN_CORE_SEC:
+                        eval_end = create_time - EVAL_SUFFIX_TRIM_SEC
+                        eval_start = eval_end - core_duration
+                    else:
+                        eval_end = create_time
+                        eval_start = eval_end - full_duration
                     start_val = time.perf_counter()
-                    eval_end = create_time
-                    eval_start = eval_end - utterance.duration_seconds()
                     speaker_scores = self._asd.evaluate(eval_start, eval_end)
                     end_val = time.perf_counter()
                     if speaker_scores:

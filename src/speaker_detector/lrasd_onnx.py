@@ -69,10 +69,16 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self.audio_window = 0.025  # seconds
         self.audio_stride = 0.01  # seconds
         self.max_track_age = 5.0  # seconds before considering a track stale
+        # 帧率降采样：只保留间隔 >= 1/video_frame_rate 的帧，使任意摄像头帧率对齐到模型期望的 25fps
+        self._min_frame_interval = 1.0 / self.video_frame_rate
+        self._last_appended_video_time = {}  # track_id -> 上次写入 video_buffer 的时间戳
 
     def append_video(self, frame_faces, create_time=None):
         """
         添加视频帧中已检测的人脸信息。
+
+        按时间戳做帧率降采样：每个 track 只保留间隔 >= 1/video_frame_rate 秒的帧，
+        使高帧率摄像头（如 30fps）输入在 buffer 中等效为 25fps，与模型训练时的音视频对齐一致。
 
         Args:
             frame_faces: 当前帧的人脸检测结果列表，每个元素为 {'id': tracker_id, 'image': face_gray}
@@ -85,6 +91,12 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         for face in frame_faces:
             track_id = face['id']
             face_img = face['image']
+
+            # 帧率降采样：该 track 距上次写入已超过 min_frame_interval 才写入
+            last_ts = self._last_appended_video_time.get(track_id, -float('inf'))
+            if create_time - last_ts < self._min_frame_interval:
+                continue
+            self._last_appended_video_time[track_id] = create_time
 
             # Resize to 112x112 grayscale
             resized_mouth_img = cv2.resize(face_img, (112, 112))
@@ -123,6 +135,8 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                 del self.video_buffer[track_id]
             if track_id in self.last_face_timestamps:
                 del self.last_face_timestamps[track_id]
+            if track_id in self._last_appended_video_time:
+                del self._last_appended_video_time[track_id]
 
     def _preprocess_audio(self, audio_data=None):
         """Convert raw audio buffer to MFCC features."""
@@ -292,5 +306,6 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self.audio_buffer.clear()
         self.video_buffer.clear()
         self.last_face_timestamps.clear()
+        self._last_appended_video_time.clear()
         self.last_video_timestamp = 0.0
         self.last_audio_timestamp = 0.0
