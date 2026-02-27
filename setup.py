@@ -10,7 +10,7 @@ for pkg in sub_packages:
 
 setup(
     name="deeptalk_asd",
-    version="0.1.0",
+    version="0.2.0",
     description="DeepTalk Active Speaker Detection",
     package_dir=package_dir,
     packages=["deeptalk_asd"] + [f"deeptalk_asd.{pkg}" for pkg in sub_packages],
