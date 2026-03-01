@@ -118,11 +118,9 @@ class InspireFaceDetector(FaceDetectorInterface):
             expand_face_image_bgr = self._expand_face_area_by_ratio(image, x1, y1, width, height, expand_ratio=1)
 
             ext = exts[idx]
-            face_image_score = ext.quality_confidence
-            if abs(face.yaw) > 20 or abs(face.pitch) > 10 or abs(face.roll) > 10:
-                face_image_score = 0
-            else:
-                face_image_score = ext.quality_confidence - abs(face.yaw) - abs(face.pitch) - abs(face.roll) * 0.8
+            face_image_score = self._compute_face_image_score(
+                ext.quality_confidence, face.yaw, face.pitch, face.roll
+            )
 
             emotion = emotion_tags[ext.emotion]
 
@@ -293,6 +291,40 @@ class InspireFaceDetector(FaceDetectorInterface):
             for face_id in face_profiles["profiles"]:
                 id_counts[face_id] = id_counts.get(face_id, 0) + 1
         return id_counts
+
+    # ---- 评分算法 ----
+
+    @staticmethod
+    def _compute_face_image_score(
+        quality_confidence: float, yaw: float, pitch: float, roll: float
+    ) -> float:
+        """
+        计算人脸图像质量评分，综合考虑图像质量和头部姿态。
+
+        使用归一化的二次惩罚函数，角度越大衰减越快，
+        权重体现各角度对人脸识别的影响程度：yaw > pitch > roll。
+
+        参数:
+            quality_confidence: InspireFace 返回的图像质量置信度
+            yaw: 偏航角（左右转头），对识别影响最大
+            pitch: 俯仰角（抬头/低头）
+            roll: 翻滚角（歪头）
+
+        返回:
+            face_image_score: 综合评分，范围 [0, quality_confidence]
+        """
+        yaw_ratio = min(abs(yaw) / 45.0, 1.0)
+        pitch_ratio = min(abs(pitch) / 30.0, 1.0)
+        roll_ratio = min(abs(roll) / 30.0, 1.0)
+
+        pose_penalty = (
+            0.5 * yaw_ratio ** 2
+            + 0.3 * pitch_ratio ** 2
+            + 0.2 * roll_ratio ** 2
+        )
+        pose_score = 1.0 - pose_penalty
+
+        return quality_confidence * pose_score
 
     # ---- 图像处理工具 ----
 
