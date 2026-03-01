@@ -457,7 +457,7 @@ def main():
             # 绘制人脸框和信息
             if face_profiles:
                 for profile in face_profiles:
-                    is_speaking = state_tracker.is_speaking(profile.track_id)
+                    is_speaking = state_tracker.is_speaking(profile.id)
                     draw_face_overlay(frame, profile, is_speaking)
 
             # 显示帧

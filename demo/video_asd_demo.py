@@ -108,7 +108,7 @@ def draw_face_overlay(frame: np.ndarray, face_profile, is_speaking: bool):
     color = COLOR_SPEAKING if is_speaking else COLOR_NOT_SPEAKING
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, BOX_THICKNESS)
 
-    parts = [f"ID:{face_profile.track_id}"]
+    parts = [f"ID:{face_profile.id}"]
     if is_speaking:
         parts.append("SPEAKING")
 
@@ -263,7 +263,7 @@ def main():
             # ── 绘制标注：说话绿框，不说话红框 ──
             if face_profiles:
                 for profile in face_profiles:
-                    is_speaking = state_tracker.is_speaking(profile.track_id)
+                    is_speaking = state_tracker.is_speaking(profile.id)
                     draw_face_overlay(frame, profile, is_speaking)
 
             writer.write(frame)
