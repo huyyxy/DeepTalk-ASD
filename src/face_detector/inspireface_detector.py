@@ -33,7 +33,7 @@ FACE_DISAPPEARANCE_INTERVAL_SECONDS = int(os.environ.get('FACE_DISAPPEARANCE_INT
 TRACK_MODE_SMOOTH_RATIO = float(os.environ.get('TRACK_MODE_SMOOTH_RATIO', '0.06'))
 TRACK_MODE_NUM_SMOOTH_CACHE_FRAME = int(os.environ.get('TRACK_MODE_NUM_SMOOTH_CACHE_FRAME', '15'))
 FILTER_MINIMUM_FACE_PIXEL_SIZE = int(os.environ.get('FILTER_MINIMUM_FACE_PIXEL_SIZE', '0'))
-TRACK_MODEL_DETECT_INTERVAL = int(os.environ.get('TRACK_MODEL_DETECT_INTERVAL', '0'))
+TRACK_MODEL_DETECT_INTERVAL = int(os.environ.get('TRACK_MODEL_DETECT_INTERVAL', '15'))
 
 race_tags = ["Black", "Asian", "Latino/Hispanic", "Middle Eastern", "White"]
 gender_tags = ["Female", "Male"]
@@ -114,7 +114,8 @@ class InspireFaceDetector(FaceDetectorInterface):
             width = x2 - x1
             height = y2 - y1
 
-            face_image_bgr = self._expand_face_area_by_ratio(image, x1, y1, width, height, expand_ratio=1)
+            face_image_bgr = self._face_area(image, x1, y1, width, height)
+            expand_face_image_bgr = self._expand_face_area_by_ratio(image, x1, y1, width, height, expand_ratio=1)
 
             ext = exts[idx]
             face_image_score = ext.quality_confidence
@@ -139,17 +140,20 @@ class InspireFaceDetector(FaceDetectorInterface):
                 )
                 if face_image_score >= history_best_face_image_score:
                     best_face_image = face_image_bgr
+                    expand_best_face_image = expand_face_image_bgr
                     best_face_image_score = face_image_score
                     feature = self.session.face_feature_extract(image, face)
                     face_id = self._match_existing_face(face.track_id, feature)
                 else:
                     best_face_image = history_profile.best_face_image
+                    expand_best_face_image = history_profile.expand_best_face_image
                     best_face_image_score = history_best_face_image_score
                     feature = history_profile.best_face_embedding
             else:
                 face_continue_frame = 1
                 first_appearance_time = time.time()
                 best_face_image = face_image_bgr
+                expand_best_face_image = expand_face_image_bgr
                 best_face_image_score = face_image_score
                 feature = self.session.face_feature_extract(image, face)
                 face_id = self._match_existing_face(face.track_id, feature)
@@ -164,8 +168,10 @@ class InspireFaceDetector(FaceDetectorInterface):
                 age=age_bracket_tags[ext.age_bracket],
                 emotion=emotion,
                 face_image=face_image_bgr,
+                expand_face_image=expand_face_image_bgr,
                 face_image_score=ext.quality_confidence,
                 best_face_image=best_face_image,
+                expand_best_face_image=expand_best_face_image,
                 best_face_image_score=best_face_image_score,
                 best_face_embedding=feature,
                 first_appearance_time=first_appearance_time,
@@ -289,6 +295,18 @@ class InspireFaceDetector(FaceDetectorInterface):
         return id_counts
 
     # ---- 图像处理工具 ----
+
+    @staticmethod
+    def _face_area(
+        image: np.ndarray, x: int, y: int, width: int, height: int
+    ) -> np.ndarray:
+        """提取人脸区域图像"""
+        start_y = max(y, 0)
+        start_x = max(x, 0)
+        end_y = min(y + height, image.shape[0])
+        end_x = min(x + width, image.shape[1])
+
+        return image[start_y:end_y, start_x:end_x]
 
     @staticmethod
     def _expand_face_area_by_ratio(

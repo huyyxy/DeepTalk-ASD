@@ -294,7 +294,7 @@ def draw_face_overlay(frame: np.ndarray, face_profile, is_speaking: bool):
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, BOX_THICKNESS)
 
     # 构建信息文本
-    info_parts = [f"ID:{face_profile.track_id}"]
+    info_parts = [f"ID:{face_profile.id}"]
     if face_profile.gender:
         info_parts.append(face_profile.gender)
     if face_profile.age:
@@ -302,7 +302,7 @@ def draw_face_overlay(frame: np.ndarray, face_profile, is_speaking: bool):
     if face_profile.emotion:
         info_parts.append(face_profile.emotion)
     if is_speaking:
-        info_parts.append("🔊")
+        info_parts.append("speaking")
 
     info_text = " | ".join(info_parts)
 

@@ -39,8 +39,8 @@ class FaceProfile:
     包含人脸的位置、姿态、属性（性别、年龄、表情）、
     图像质量评分、最佳人脸图像及其嵌入向量，以及出现时间等信息。
     """
-    id: int
-    track_id: int
+    id: int  # 会根据face embedding回溯到一开始相似的track_id，能在异常情况下确保track_id的不变
+    track_id: int  # 人脸检测算法直接返回的track_id
     face_continue_frame: int
     face_rectangle: FaceRectangle
     head_pose: HeadPose
@@ -48,8 +48,10 @@ class FaceProfile:
     age: str
     emotion: str
     face_image: Optional[np.ndarray] = None
+    expand_face_image: Optional[np.ndarray] = None
     face_image_score: float = 0.0
     best_face_image: Optional[np.ndarray] = None
+    expand_best_face_image: Optional[np.ndarray] = None # 做人脸识别比对需要扩大的最佳人脸
     best_face_image_score: float = 0.0
     best_face_embedding: Optional[np.ndarray] = None
     first_appearance_time: Optional[float] = None
@@ -77,8 +79,10 @@ class FaceProfile:
             "age": self.age,
             "emotion": self.emotion,
             "face_image": self.face_image,
+            "expand_face_image": self.expand_face_image,
             "face_image_score": self.face_image_score,
             "best_face_image": self.best_face_image,
+            "expand_best_face_image": self.expand_best_face_image,
             "best_face_image_score": self.best_face_image_score,
             "best_face_embedding": self.best_face_embedding,
             "first_appearance_time": self.first_appearance_time,
