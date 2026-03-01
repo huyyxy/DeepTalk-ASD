@@ -88,6 +88,7 @@ def is_same_face(box1, box2, angles1, angles2,
 
 # 各模型针对不同度量的阈值设定
 thresholds = {
+    "InspireFace-Pikachu": {"cosine": 0.48, "euclidean": 0.98, "euclidean_l2": 0.98},
     # "VGG-Face": {"cosine": 0.40, "euclidean": 0.60, "euclidean_l2": 0.86}, # 2622维
     "VGG-Face": {
         "cosine": 0.68,
@@ -116,6 +117,6 @@ def is_same_face_by_embedding(embedding1, embedding2) -> bool:
     # 将余弦相似度转换为余弦距离
     cosine_distance = 1 - cosine_similarity
     # print(f"\r\n\r\n\r\n\r\n face cosine_distance =======> {cosine_distance:.3f} \r\n\r\n\r\n\r\n")
-    if cosine_distance < 0.6:
+    if cosine_distance < thresholds["InspireFace-Pikachu"]["cosine"]:
         return True
     return False
