@@ -283,7 +283,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                     t0 = time.perf_counter()
                     chunk_scores = self._run_inference(audio_chunk, video_chunk)
                     elapsed = time.perf_counter() - t0
-                    logger.debug(f"[LR-ASD-ONNX] inference chunk cost {elapsed:.4f}s")
+                    logger.debug(f"[LR-ASD-ONNX] inference chunk cost {elapsed:.3f}s")
 
                     scores.extend(chunk_scores.flatten().tolist())
 

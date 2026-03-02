@@ -137,6 +137,7 @@ class InspireFaceDetector(FaceDetectorInterface):
                     if history_profile.best_face_image_score is not None else -1
                 )
                 if face_image_score >= history_best_face_image_score:
+                    # 已有历史记录但获得了更好的人脸图像
                     best_face_image = face_image_bgr
                     expand_best_face_image = expand_face_image_bgr
                     best_face_image_score = face_image_score
@@ -154,6 +155,7 @@ class InspireFaceDetector(FaceDetectorInterface):
                 expand_best_face_image = expand_face_image_bgr
                 best_face_image_score = face_image_score
                 feature = self.session.face_feature_extract(image, face)
+                # 一个人短暂消失后重新出现，分配一个全新的track_id时，实现跨 track 断裂的身份恢复
                 face_id = self._match_existing_face(face.track_id, feature)
 
             profile = FaceProfile(
