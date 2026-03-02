@@ -121,6 +121,7 @@ class SpeakingStateTracker:
 
     def __init__(self, persist_sec: float = SPEAKING_PERSIST_SEC):
         self._speaking_faces: dict[int, float] = {}  # track_id -> timestamp
+        self._persistent_faces: set[int] = set()     # 持久说话人 (不超时)
         self._lock = threading.Lock()
         self._persist_sec = persist_sec
 
@@ -139,10 +140,30 @@ class SpeakingStateTracker:
                 if score > 0:
                     self._speaking_faces[track_id] = now
 
+    def set_persistent_speakers(self, speaker_scores: dict):
+        """设置持久说话人（绿框不超时消失，直到手动清除）"""
+        with self._lock:
+            self._persistent_faces = {
+                tid for tid, score in speaker_scores.items() if score > 0
+            }
+
+    def clear_persistent_speakers(self):
+        """清除持久说话人状态"""
+        with self._lock:
+            self._persistent_faces.clear()
+
+    def has_persistent_speakers(self) -> bool:
+        """查询当前是否有持久说话人"""
+        with self._lock:
+            return len(self._persistent_faces) > 0
+
     def is_speaking(self, track_id: int) -> bool:
-        """判断某个 track_id 是否仍在"说话"状态"""
+        """判断某个 track_id 是否仍在\"说话\"状态"""
         now = time.perf_counter()
         with self._lock:
+            # 检查持久说话人
+            if track_id in self._persistent_faces:
+                return True
             last_time = self._speaking_faces.get(track_id)
             if last_time is None:
                 return False
@@ -180,6 +201,7 @@ class AudioCaptureThread(threading.Thread):
         self._device_index = device_index
         self._running = False
         self._chunk_samples = int(sample_rate * AUDIO_CHUNK_MS / 1000)  # 每 chunk 采样数
+        self._confirmed_has_speaker = False  # 本轮 utterance 是否已在 TURN_CONFIRMED 检测到说话人
 
     def run(self):
         """音频采集主循环"""
@@ -240,23 +262,47 @@ class AudioCaptureThread(threading.Thread):
                 # 调用 ASD append_audio 进行 VAD 检测
                 utterance = self._asd.append_audio(audio_frame, create_time)
 
-                if utterance is not None and utterance.turn_state == TurnState.TURN_END:
-                    # VAD 检测到说话结束，评估活动说话者
-                    # 裁掉 utterance 前后的静音段，只用“核心人声”窗口，避免静音稀释导致分数偏低
+                if utterance is not None and utterance.turn_state == TurnState.TURN_CONFIRMED:
+                    # TURN_CONFIRMED：检测说话人，如果有则设为持久绿框
                     full_duration = utterance.duration_seconds()
-                    core_duration = full_duration - EVAL_PREFIX_TRIM_SEC - EVAL_SUFFIX_TRIM_SEC
-                    if core_duration >= EVAL_MIN_CORE_SEC:
-                        eval_end = create_time - EVAL_SUFFIX_TRIM_SEC
-                        eval_start = eval_end - core_duration
-                    else:
-                        eval_end = create_time
-                        eval_start = eval_end - full_duration
+                    eval_end = create_time
+                    eval_start = eval_end - full_duration
                     start_val = time.perf_counter()
                     speaker_scores = self._asd.evaluate(eval_start, eval_end)
                     end_val = time.perf_counter()
                     if speaker_scores:
-                        self._state_tracker.update_speakers(speaker_scores)
-                        print(f"[ASD] 说话者评估结果: {speaker_scores}, 耗时: {end_val - start_val}")
+                        has_speaker = any(score > 0 for score in speaker_scores.values())
+                        if has_speaker:
+                            self._state_tracker.set_persistent_speakers(speaker_scores)
+                            self._confirmed_has_speaker = True
+                        else:
+                            self._confirmed_has_speaker = False
+                        print(f"[ASD] TURN_CONFIRMED 说话者评估: {speaker_scores}, 耗时: {end_val - start_val:.3f}s")
+                    else:
+                        self._confirmed_has_speaker = False
+                elif utterance is not None and utterance.turn_state == TurnState.TURN_END:
+                    if self._confirmed_has_speaker:
+                        # TURN_CONFIRMED 时已检测到说话人，结束持久绿框
+                        self._state_tracker.clear_persistent_speakers()
+                        print(f"[ASD] TURN_END: 清除持久说话人")
+                    else:
+                        # TURN_CONFIRMED 时未检测到说话人，再检测一次
+                        full_duration = utterance.duration_seconds()
+                        core_duration = full_duration - EVAL_PREFIX_TRIM_SEC - EVAL_SUFFIX_TRIM_SEC
+                        if core_duration >= EVAL_MIN_CORE_SEC:
+                            eval_end = create_time - EVAL_SUFFIX_TRIM_SEC
+                            eval_start = eval_end - core_duration
+                        else:
+                            eval_end = create_time
+                            eval_start = eval_end - full_duration
+                        start_val = time.perf_counter()
+                        speaker_scores = self._asd.evaluate(eval_start, eval_end)
+                        end_val = time.perf_counter()
+                        if speaker_scores:
+                            self._state_tracker.update_speakers(speaker_scores)
+                            print(f"[ASD] TURN_END 补充检测: {speaker_scores}, 耗时: {end_val - start_val:.3f}s")
+                    self._confirmed_has_speaker = False
+
 
         except Exception as e:
             print(f"[错误] 音频线程异常: {e}")

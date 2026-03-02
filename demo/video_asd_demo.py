@@ -17,13 +17,14 @@ import sys
 import time
 import argparse
 import subprocess
+import tempfile
 
 import cv2
 import numpy as np
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-from deeptalk_asd import ASDDetectorFactory, VideoFrame, VideoBufferType, AudioFrame
+from deeptalk_asd import ASDDetectorFactory, VideoFrame, VideoBufferType, AudioFrame, TurnState
 
 
 # ──────────────────────────────────────────────
@@ -32,14 +33,19 @@ from deeptalk_asd import ASDDetectorFactory, VideoFrame, VideoBufferType, AudioF
 AUDIO_SAMPLE_RATE = 16000
 AUDIO_CHUNK_MS = 30
 AUDIO_CHUNK_SAMPLES = int(AUDIO_SAMPLE_RATE * AUDIO_CHUNK_MS / 1000)
-EVAL_INTERVAL_SEC = 1.0
+SPEAKING_PERSIST_SEC = 0.5   # 说话者绿框持续时间（秒）
+# 与 Silero VAD 一致：utterance 开头为前置静音、结尾为触发结束的静音
+EVAL_PREFIX_TRIM_SEC = 0.05
+EVAL_SUFFIX_TRIM_SEC = 0.05
+EVAL_MIN_CORE_SEC = 0.4
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.6
 FONT_THICKNESS = 2
 BOX_THICKNESS = 2
-COLOR_SPEAKING = (0, 255, 0)
-COLOR_NOT_SPEAKING = (0, 0, 255)
+COLOR_SPEAKING = (0, 255, 0)         # 绿色 - 主说话人
+COLOR_SPEAKING_SECONDARY = (255, 165, 0)  # 蓝色 - 次说话人 (BGR)
+COLOR_NOT_SPEAKING = (0, 0, 255)     # 红色
 COLOR_TEXT_BG = (0, 0, 0)
 COLOR_TEXT_FG = (255, 255, 255)
 
@@ -58,8 +64,6 @@ def parse_args():
     parser.add_argument("--onnx-dir", type=str, default=None)
     parser.add_argument("--vad-model-path", type=str, default=None)
     parser.add_argument("--abs-amplitude-threshold", type=float, default=0.01)
-    parser.add_argument("--eval-interval", type=float, default=EVAL_INTERVAL_SEC,
-                        help="说话者评估间隔，单位秒 (默认: 1.0)")
     return parser.parse_args()
 
 
@@ -85,32 +89,91 @@ def extract_audio_from_video(video_path: str, sample_rate: int = 16000) -> np.nd
 
 
 class SpeakingStateTracker:
-    """说话状态追踪器，记录每个 track_id 最新的说话评分"""
+    """说话状态追踪器，支持持久说话人和超时说话人，区分主/次说话人"""
 
-    def __init__(self):
-        self._scores: dict[int, float] = {}
+    def __init__(self, persist_sec: float = SPEAKING_PERSIST_SEC):
+        self._speaking_faces: dict[int, float] = {}  # track_id -> timestamp (超时机制)
+        self._persistent_faces: set[int] = set()     # 持久说话人 (不超时)
+        self._primary_speaker: int = -1               # 分数最高的说话人 track_id
+        self._persist_sec = persist_sec
+
+    def _update_primary(self, speaker_scores: dict):
+        """从 speaker_scores 中找出分数最高的说话人"""
+        best_tid, best_score = -1, 0
+        for tid, score in speaker_scores.items():
+            if score > best_score:
+                best_tid, best_score = tid, score
+        self._primary_speaker = best_tid
 
     def update_speakers(self, speaker_scores: dict):
+        """更新说话者状态（0.5 秒超时）"""
         if not speaker_scores:
             return
-        self._scores = dict(speaker_scores)
+        now = time.perf_counter()
+        for track_id, score in speaker_scores.items():
+            if score > 0:
+                self._speaking_faces[track_id] = now
+        self._update_primary(speaker_scores)
 
-    def is_speaking(self, track_id: int) -> bool:
-        return self._scores.get(track_id, 0) > 0
+    def set_persistent_speakers(self, speaker_scores: dict):
+        """设置持久说话人（绿框不超时消失，直到手动清除）"""
+        self._persistent_faces = {
+            tid for tid, score in speaker_scores.items() if score > 0
+        }
+        self._update_primary(speaker_scores)
+
+    def clear_persistent_speakers(self):
+        """清除持久说话人状态"""
+        self._persistent_faces.clear()
+        self._primary_speaker = -1
+
+    def has_persistent_speakers(self) -> bool:
+        """查询当前是否有持久说话人"""
+        return len(self._persistent_faces) > 0
+
+    def get_speaking_level(self, track_id: int) -> str:
+        """
+        获取说话级别：
+            'primary'   - 分数最高的说话人（绿色）
+            'secondary' - 其他说话人（蓝色）
+            None        - 未说话（红色）
+        """
+        # 检查持久说话人
+        if track_id in self._persistent_faces:
+            return 'primary' if track_id == self._primary_speaker else 'secondary'
+        # 检查超时说话人
+        now = time.perf_counter()
+        last_time = self._speaking_faces.get(track_id)
+        if last_time is not None:
+            if now - last_time <= self._persist_sec:
+                return 'primary' if track_id == self._primary_speaker else 'secondary'
+            else:
+                del self._speaking_faces[track_id]
+        return None
 
 
-def draw_face_overlay(frame: np.ndarray, face_profile, is_speaking: bool):
-    """在视频帧上绘制人脸框和信息标注"""
+def draw_face_overlay(frame: np.ndarray, face_profile, speaking_level: str):
+    """
+    在视频帧上绘制人脸框和信息标注。
+    speaking_level: 'primary' (绿), 'secondary' (蓝), None (红)
+    """
     rect = face_profile.face_rectangle
     x, y = int(rect.x), int(rect.y)
     w, h = int(rect.width), int(rect.height)
 
-    color = COLOR_SPEAKING if is_speaking else COLOR_NOT_SPEAKING
+    if speaking_level == 'primary':
+        color = COLOR_SPEAKING
+    elif speaking_level == 'secondary':
+        color = COLOR_SPEAKING_SECONDARY
+    else:
+        color = COLOR_NOT_SPEAKING
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, BOX_THICKNESS)
 
     parts = [f"ID:{face_profile.id}"]
-    if is_speaking:
+    if speaking_level == 'primary':
         parts.append("SPEAKING")
+    elif speaking_level == 'secondary':
+        parts.append("SPEAKING*")
 
     info_text = " | ".join(parts)
     (text_w, text_h), baseline = cv2.getTextSize(info_text, FONT, FONT_SCALE, FONT_THICKNESS)
@@ -132,7 +195,9 @@ def create_asd(args):
     turn_detector_config = {
         "type": args.turn_detector,
         "model_path": vad_model_path,
+        "prefix_padding_ms": int(EVAL_PREFIX_TRIM_SEC * 1000),
         "abs_amplitude_threshold": args.abs_amplitude_threshold,
+        "silence_duration_ms": int(EVAL_SUFFIX_TRIM_SEC * 1000),  # 缩短静音判定，使 VAD 更快切分不同说话人
     }
     speaker_detector_config = {
         "type": args.speaker_detector,
@@ -191,19 +256,20 @@ def main():
     print(f"  分辨率: {frame_w}x{frame_h}, FPS: {fps:.2f}, "
           f"总帧数: {total_frames}, 时长: {duration:.2f}s")
 
-    # 4. 初始化视频写入器
+    # 4. 初始化视频写入器（先写入临时文件，稍后合并音频）
+    tmp_fd, tmp_video_path = tempfile.mkstemp(suffix=".mp4")
+    os.close(tmp_fd)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(args.output, fourcc, fps, (frame_w, frame_h))
+    writer = cv2.VideoWriter(tmp_video_path, fourcc, fps, (frame_w, frame_h))
     if not writer.isOpened():
-        print(f"[错误] 无法创建输出视频: {args.output}")
+        print(f"[错误] 无法创建临时输出视频: {tmp_video_path}")
         cap.release()
         sys.exit(1)
 
     # 5. 初始化状态追踪
     state_tracker = SpeakingStateTracker()
-    eval_interval = args.eval_interval
     audio_cursor = 0
-    last_eval_video_time = -eval_interval  # 保证首次满足间隔即触发
+    confirmed_has_speaker = False  # 本轮 utterance 是否已在 TURN_CONFIRMED 检测到说话人
 
     if args.display:
         window_name = "DeepTalk-ASD 视频分析"
@@ -212,7 +278,6 @@ def main():
     frame_idx = 0
     process_start = time.perf_counter()
 
-    print(f"[信息] 评估间隔: {eval_interval}s")
     print(f"\n[信息] 开始处理视频...")
 
     try:
@@ -237,7 +302,45 @@ def main():
                     num_channels=1,
                     samples_per_channel=len(chunk),
                 )
-                asd.append_audio(audio_frame, chunk_time)
+                utterance = asd.append_audio(audio_frame, chunk_time)
+
+                # ── TURN_CONFIRMED：检测说话人，有则持久绿框 ──
+                if utterance is not None and utterance.turn_state == TurnState.TURN_CONFIRMED:
+                    full_duration = utterance.duration_seconds()
+                    eval_end = chunk_time
+                    eval_start = eval_end - full_duration
+                    speaker_scores = asd.evaluate(eval_start, eval_end)
+                    if speaker_scores:
+                        has_speaker = any(score > 0 for score in speaker_scores.values())
+                        if has_speaker:
+                            state_tracker.set_persistent_speakers(speaker_scores)
+                            confirmed_has_speaker = True
+                        else:
+                            confirmed_has_speaker = False
+                        print(f"  [{video_time:.2f}s] TURN_CONFIRMED 说话者评估: {speaker_scores}")
+                    else:
+                        confirmed_has_speaker = False
+
+                # ── TURN_END：清除持久绿框或补充检测 ──
+                elif utterance is not None and utterance.turn_state == TurnState.TURN_END:
+                    if confirmed_has_speaker:
+                        state_tracker.clear_persistent_speakers()
+                        print(f"  [{video_time:.2f}s] TURN_END: 清除持久说话人")
+                    else:
+                        full_duration = utterance.duration_seconds()
+                        core_duration = full_duration - EVAL_PREFIX_TRIM_SEC - EVAL_SUFFIX_TRIM_SEC
+                        if core_duration >= EVAL_MIN_CORE_SEC:
+                            eval_end = chunk_time - EVAL_SUFFIX_TRIM_SEC
+                            eval_start = eval_end - core_duration
+                        else:
+                            eval_end = chunk_time
+                            eval_start = eval_end - full_duration
+                        speaker_scores = asd.evaluate(eval_start, eval_end)
+                        if speaker_scores:
+                            state_tracker.update_speakers(speaker_scores)
+                            print(f"  [{video_time:.2f}s] TURN_END 补充检测: {speaker_scores}")
+                    confirmed_has_speaker = False
+
                 audio_cursor = chunk_end
 
             # ── 送入视频帧 ──
@@ -250,21 +353,11 @@ def main():
             )
             face_profiles = asd.append_video(video_frame, create_time)
 
-            # ── 定时评估说话者 ──
-            if video_time - last_eval_video_time >= eval_interval:
-                eval_end = create_time
-                eval_start = eval_end - eval_interval
-                speaker_scores = asd.evaluate(eval_start, eval_end)
-                if speaker_scores:
-                    state_tracker.update_speakers(speaker_scores)
-                    print(f"  [{video_time:.2f}s] 说话者评估: {speaker_scores}")
-                last_eval_video_time = video_time
-
-            # ── 绘制标注：说话绿框，不说话红框 ──
+            # ── 绘制标注：主说话人绿框，次说话人蓝框，不说话红框 ──
             if face_profiles:
                 for profile in face_profiles:
-                    is_speaking = state_tracker.is_speaking(profile.id)
-                    draw_face_overlay(frame, profile, is_speaking)
+                    speaking_level = state_tracker.get_speaking_level(profile.id)
+                    draw_face_overlay(frame, profile, speaking_level)
 
             writer.write(frame)
 
@@ -292,6 +385,32 @@ def main():
         writer.release()
         if args.display:
             cv2.destroyAllWindows()
+
+        # 使用 ffmpeg 将原视频的音频轨道合并到渲染后的视频中
+        print(f"\n[信息] 正在合并音频到输出视频...")
+        mux_cmd = [
+            "ffmpeg", "-y",
+            "-i", tmp_video_path,   # 渲染后的视频（无音频）
+            "-i", args.input,       # 原始视频（取音频）
+            "-c:v", "copy",         # 视频流直接拷贝
+            "-c:a", "aac",          # 音频编码为 AAC
+            "-map", "0:v:0",        # 取第一个输入的视频流
+            "-map", "1:a:0",        # 取第二个输入的音频流
+            "-shortest",
+            args.output,
+        ]
+        mux_proc = subprocess.run(mux_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # 清理临时文件
+        try:
+            os.remove(tmp_video_path)
+        except OSError:
+            pass
+
+        if mux_proc.returncode != 0:
+            stderr_text = mux_proc.stderr.decode("utf-8", errors="replace")
+            print(f"[警告] 音频合并失败，输出视频可能没有声音:\n{stderr_text}")
+        else:
+            print(f"[信息] 音频合并完成")
 
         total_elapsed = time.perf_counter() - process_start
         print(f"\n[完成] 输出视频: {args.output}")
