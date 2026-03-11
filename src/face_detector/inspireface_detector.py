@@ -408,7 +408,13 @@ class InspireFaceDetector(FaceDetectorInterface):
 
     def destroy(self):
         """释放检测器资源"""
-        self.session = None
+        if self.session is not None:
+            # 尝试调用session的清理方法
+            if hasattr(self.session, 'close'):
+                self.session.close()
+            elif hasattr(self.session, 'release'):
+                self.session.release()
+            self.session = None
         self.history_faces.clear()
         self.window_face_profiles.clear()
         self.id_mapping.clear()
