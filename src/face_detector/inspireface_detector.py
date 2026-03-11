@@ -56,7 +56,13 @@ class InspireFaceDetector(FaceDetectorInterface):
         """
         super().__init__(**kwargs)
 
-        isf.launch(resource_path=INSPIREFACE_RESOURCE_PATH)
+        # 检查是否已经初始化，避免重复初始化导致资源泄漏
+        # 如果已经初始化，launch()会抛出异常，我们捕获它
+        try:
+            isf.launch(resource_path=INSPIREFACE_RESOURCE_PATH)
+        except Exception:
+            # 已经初始化过，忽略异常
+            pass
 
         opt = (isf.HF_ENABLE_FACE_RECOGNITION | isf.HF_ENABLE_QUALITY |
                isf.HF_ENABLE_INTERACTION | isf.HF_ENABLE_FACE_ATTRIBUTE | isf.HF_ENABLE_FACE_EMOTION)
