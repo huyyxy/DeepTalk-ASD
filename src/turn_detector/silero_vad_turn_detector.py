@@ -79,7 +79,8 @@ class SileroVadTurnDetector(TurnDetectorInterface):
         self._voice_duration_ms = 0
         self._silence_duration_ms_acc = 0
         self._is_confirmed = False
-        # 注意: _prefix_buffer 不在此处清空，保持滚动缓冲
+        # 清空前置缓冲区，避免旧数据影响新的语音段
+        self._prefix_buffer.clear()
 
     def detect(self, audio_frame: AudioFrame) -> Utterance:
         """根据输入的音频帧，检测轮次信息
