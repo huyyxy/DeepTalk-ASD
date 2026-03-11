@@ -68,6 +68,9 @@ class SileroVAD:
             raise ValueError(f"Expected {CHUNK} samples, got {x.shape[1]}")
         x = np.concatenate((self._context, x), axis=1)
 
+        if self._state is None:
+            self._init_states()
+
         ort_inputs = {
             "input": x.astype(np.float32),
             "state": self._state,
