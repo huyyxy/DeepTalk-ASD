@@ -28,10 +28,7 @@ logging.basicConfig(
 )
 
 class DeepTalkLogger:
-    def __init__(self):
-        self.logger = logging.getLogger()
-
-    def __init__(self, name: str):
+    def __init__(self, name: str = ""):
         self.logger = logging.getLogger(name)
 
     def debug(self, msg, *args, **kwargs):
