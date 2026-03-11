@@ -168,16 +168,21 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         Returns:
             scores: (T,) 每帧的说话概率分数
         """
-        audio_input = audio_feature[np.newaxis, ...]   # (1, T*4, 13)
-        visual_input = video_feature[np.newaxis, ...]  # (1, T, 112, 112)
+        try:
+            audio_input = audio_feature[np.newaxis, ...]   # (1, T*4, 13)
+            visual_input = video_feature[np.newaxis, ...]  # (1, T, 112, 112)
 
-        audio_embed = self.sess_audio.run(None, {"audio_feature": audio_input})[0]
-        visual_embed = self.sess_visual.run(None, {"visual_feature": visual_input})[0]
-        scores = self.sess_backend.run(
-            None, {"audio_embed": audio_embed, "visual_embed": visual_embed}
-        )[0]
+            audio_embed = self.sess_audio.run(None, {"audio_feature": audio_input})[0]
+            visual_embed = self.sess_visual.run(None, {"visual_feature": visual_input})[0]
+            scores = self.sess_backend.run(
+                None, {"audio_embed": audio_embed, "visual_embed": visual_embed}
+            )[0]
 
-        return scores
+            return scores
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"ONNX inference failed: {e}")
+            return np.array([])
 
     def evaluate(self, start_time: float = None, end_time: float = None):
         """
