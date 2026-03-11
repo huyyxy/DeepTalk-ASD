@@ -98,6 +98,7 @@ class InspireFaceDetector(FaceDetectorInterface):
     def _detect(self, image: np.ndarray) -> dict:
         """检测图像中的人脸并更新人脸信息"""
         faces = self.session.face_detection(image)
+        exts = None
         if faces and len(faces) > 0:
             exts = self.session.face_pipeline(
                 image, faces,
@@ -117,6 +118,8 @@ class InspireFaceDetector(FaceDetectorInterface):
             face_image_bgr = self._face_area(image, x1, y1, width, height)
             expand_face_image_bgr = self._expand_face_area_by_ratio(image, x1, y1, width, height, expand_ratio=1)
 
+            if exts is None:
+                continue
             ext = exts[idx]
             face_image_score = self._compute_face_image_score(
                 ext.quality_confidence, face.yaw, face.pitch, face.roll
