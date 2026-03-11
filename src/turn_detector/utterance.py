@@ -76,6 +76,8 @@ class Utterance:
         -32768   # 静默返回错误结果，没有任何警告！
         所以结果有小概率略微偏小，但影响不大。
         """
+        if not self.frames:
+            return 0.0
         y = np.ctypeslib.as_array(self.data)
 
         # 在 int16 上计算绝对值的百分位数（只分配一个 int16 数组）
