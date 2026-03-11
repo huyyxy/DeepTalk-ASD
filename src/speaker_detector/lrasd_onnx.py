@@ -118,6 +118,8 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             create_time = time.perf_counter()
 
         if isinstance(audio_chunk, (bytes, bytearray)):
+            if len(audio_chunk) % 2 != 0:
+                logger.warning("音频数据长度不是偶数，可能不是 16-bit PCM")
             audio_chunk = np.frombuffer(audio_chunk, dtype=np.int16)
 
         self.audio_buffer.extend(audio_chunk)
