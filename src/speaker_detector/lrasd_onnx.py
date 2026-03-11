@@ -276,7 +276,8 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                         audio_chunk = np.pad(
                             audio_chunk,
                             ((0, target_a_len - audio_chunk.shape[0]), (0, 0)),
-                            'wrap',
+                            'constant',
+                            constant_values=0,
                         )
                     audio_chunk = audio_chunk[:target_a_len, :]
 
