@@ -17,4 +17,5 @@ dependencies = [
     "scipy",
     "pandas",
     "tqdm",
+    "sherpa-onnx",
 ]

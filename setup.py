@@ -25,5 +25,6 @@ setup(
         "scipy",
         "pandas",
         "tqdm",
+        "sherpa-onnx",
     ],
 )
