@@ -8,6 +8,8 @@ import python_speech_features
 import onnxruntime as ort
 from .interface import SpeakerDetectorInterface
 
+from .voiceprint import SpeakerEmbeddingExtractor, cosine_similarity
+
 from ..deeptalk_logger import DeepTalkLogger
 
 logger = DeepTalkLogger(__name__)
@@ -36,7 +38,22 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self.audio_sample_rate = kwargs.get('audio_sample_rate', 16000)
         device = kwargs.get('device', 'cpu')
         onnx_dir = kwargs.get('onnx_dir', 'weights')
+        default_voiceprint_model_path = os.path.join(onnx_dir, 'wespeaker_zh_cnceleb_resnet34.onnx')
+        voiceprint_model_path = kwargs.get('voiceprint_model_path', default_voiceprint_model_path)
 
+        # Voiceprint Integration
+        self.voice_extractor = None
+        if voiceprint_model_path and os.path.exists(voiceprint_model_path):
+            try:
+                self.voice_extractor = SpeakerEmbeddingExtractor(
+                    model_path=voiceprint_model_path,
+                    provider=device
+                )
+            except Exception as e:
+                logger.error(f"无法初始化声纹提取器: {e}")
+        else:
+            logger.critical(f"[VOICEPRINT] without voiceprint_model_path")
+        
         # 选择 ONNX Runtime provider
         if device == 'cuda':
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
@@ -62,6 +79,10 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self.audio_buffer = deque(maxlen=16000 * 10)  # 10 seconds buffer
         self.video_buffer = defaultdict(list)  # track_id -> list of (frame, timestamp)
         self.last_face_timestamps = {}  # track_id -> last create time
+        
+        # Voiceprint profiles
+        self.voice_profiles = {}  # track_id -> embedding (np.ndarray)
+        
         self.last_video_timestamp = 0.0
         self.last_audio_timestamp = 0.0
 
@@ -139,6 +160,8 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                 del self.last_face_timestamps[track_id]
             if track_id in self._last_appended_video_time:
                 del self._last_appended_video_time[track_id]
+            if track_id in self.voice_profiles:
+                del self.voice_profiles[track_id]
 
     def _preprocess_audio(self, audio_data=None):
         """Convert raw audio buffer to MFCC features."""
@@ -220,6 +243,22 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         if effective_start is None:
             audio_features = self._preprocess_audio()
 
+        # Voiceprint extraction for current audio chunk
+        current_voice_emb = None
+        if self.voice_extractor is not None and effective_start is not None:
+            try:
+                # Need at least 0.5s of audio to get a reasonable embedding
+                if (effective_end - effective_start) > 0.5:
+                    current_voice_emb = self.voice_extractor.extract_from_samples(
+                        audio_data.astype(np.float32) / 32768.0, 
+                        sample_rate=self.audio_sample_rate
+                    )
+                    logger.critical(f"[VOICEPRINT] extract_from_samples success")
+                else:
+                    logger.critical(f"[VOICEPRINT] without extract_from_samples")
+            except Exception as e:
+                logger.warning(f"声纹提取失败: {e}")
+
         audio_feature_rate = int(1.0 / self.audio_stride)  # 100
 
         duration_set = [1, 2]
@@ -296,7 +335,42 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                 avg_scores = np.round(
                     np.mean(np.array(track_all_scores), axis=0), 1
                 ).astype(float)
-                all_scores[track_id] = float(np.mean(avg_scores))
+                asd_score = float(np.mean(avg_scores))
+                
+                # --- 声纹分数融合策略 (Score Fusion) ---
+                final_score = asd_score
+                if current_voice_emb is not None:
+                    # 获取该 track_id 历史声纹档案
+                    profile_emb = self.voice_profiles.get(track_id)
+                    
+                    if profile_emb is not None:
+                        similarity = cosine_similarity(current_voice_emb, profile_emb)
+                        logger.critical(f"[VOICEPRINT] track={track_id}, similarity={similarity:.3f}, asd_score={asd_score:.3f}")
+                        
+                        if similarity > 0.65:
+                            # 声音极度吻合，拉高分数弥补侧脸/嘴遮挡导致的 ASD 偏低
+                            final_score = max(asd_score, similarity * 0.9)
+                        elif similarity < 0.3:
+                            # 声音截然不同（可能是画外音），即使有唇动也判定为非本说话人
+                            final_score = asd_score * 0.3
+                        else:
+                            # 模棱两可：保留混合趋势
+                            final_score = asd_score * 0.7 + similarity * 0.3
+
+                # 更新档案：若高精度 ASD 确认这人在说话
+                if final_score > 0.85 and current_voice_emb is not None:
+                    if track_id not in self.voice_profiles:
+                        self.voice_profiles[track_id] = current_voice_emb
+                        logger.info(f"[VOICEPRINT] track={track_id} 初始化声纹档案")
+                    else:
+                        # EMA 平滑更新
+                        alpha = 0.8
+                        updated_emb = alpha * self.voice_profiles[track_id] + (1 - alpha) * current_voice_emb
+                        # 重新归一化
+                        updated_emb /= np.linalg.norm(updated_emb)
+                        self.voice_profiles[track_id] = updated_emb
+
+                all_scores[track_id] = float(final_score)
             else:
                 all_scores[track_id] = 0.0
 
@@ -309,5 +383,6 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self.video_buffer.clear()
         self.last_face_timestamps.clear()
         self._last_appended_video_time.clear()
+        self.voice_profiles.clear()
         self.last_video_timestamp = 0.0
         self.last_audio_timestamp = 0.0
