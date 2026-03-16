@@ -12,6 +12,35 @@ from .voiceprint import SpeakerEmbeddingExtractor, cosine_similarity
 
 from ..deeptalk_logger import DeepTalkLogger
 
+# 阈值与配置（可从环境变量覆盖）
+# 声纹快速匹配：当前音频与某 track 声纹相似度超过此阈值即视为匹配，用于唯一说话人直接判定
+VOICEPRINT_FAST_MATCH_THRESHOLD = float(os.getenv("LRASD_VOICEPRINT_FAST_MATCH_THRESHOLD", "0.65"))
+# 声纹分数融合：相似度高于此值认为“声音极度吻合”，会拉高最终分数
+VOICEPRINT_SIMILARITY_HIGH = float(os.getenv("LRASD_VOICEPRINT_SIMILARITY_HIGH", "0.65"))
+# 声纹分数融合：相似度低于此值认为“声音截然不同”（如画外音），会压制最终分数
+VOICEPRINT_SIMILARITY_LOW = float(os.getenv("LRASD_VOICEPRINT_SIMILARITY_LOW", "0.3"))
+# 声纹档案更新时的 EMA 平滑系数（0~1），越大越保留历史声纹
+VOICEPRINT_EMA_ALPHA = float(os.getenv("LRASD_VOICEPRINT_EMA_ALPHA", "0.8"))
+# 提取声纹所需的最短音频时长（秒），短于此长度不提取声纹
+VOICEPRINT_MIN_AUDIO_SEC = float(os.getenv("LRASD_VOICEPRINT_MIN_AUDIO_SEC", "0.5"))
+# 最终分数超过此阈值且有声纹时，会创建或更新该 track 的声纹档案
+ASD_CONFIRM_SPEAKING_THRESHOLD = float(os.getenv("LRASD_ASD_CONFIRM_SPEAKING_THRESHOLD", "0.85"))
+# 声纹极度吻合时，最终分数 = max(asd_score, similarity * 此权重)
+VOICEPRINT_BOOST_WEIGHT = float(os.getenv("LRASD_VOICEPRINT_BOOST_WEIGHT", "0.9"))
+# 声纹截然不同时，最终分数 = asd_score * 此系数（压制画外音）
+VOICEPRINT_REJECT_SCALE = float(os.getenv("LRASD_VOICEPRINT_REJECT_SCALE", "0.3"))
+# 声纹模棱两可时的混合权重：final_score = asd_score * BLEND_ASD + similarity * BLEND_SIM
+VOICEPRINT_BLEND_ASD = float(os.getenv("LRASD_VOICEPRINT_BLEND_ASD", "0.7"))
+VOICEPRINT_BLEND_SIM = float(os.getenv("LRASD_VOICEPRINT_BLEND_SIM", "0.3"))
+# 声纹快速匹配中，未匹配到的 track 赋予的分数（通常为负表示未说话）
+NON_MATCHED_TRACK_SCORE = float(os.getenv("LRASD_NON_MATCHED_TRACK_SCORE", "-1.0"))
+# MFCC 提取的窗口长度（秒）
+AUDIO_WINDOW = float(os.getenv("LRASD_AUDIO_WINDOW", "0.025"))
+# MFCC 提取的帧移/步长（秒）
+AUDIO_STRIDE = float(os.getenv("LRASD_AUDIO_STRIDE", "0.01"))
+# 人脸轨迹过期时间（秒），超过此时间未更新的人脸 track 会被清理
+MAX_TRACK_AGE = float(os.getenv("LRASD_MAX_TRACK_AGE", "5.0"))
+
 logger = DeepTalkLogger(__name__)
 
 
@@ -87,10 +116,10 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self.last_video_timestamp = 0.0
         self.last_audio_timestamp = 0.0
 
-        # 配置参数
-        self.audio_window = 0.025  # 音频窗口大小（秒）
-        self.audio_stride = 0.01  # 音频步长（秒）
-        self.max_track_age = 5.0  # 人脸轨迹过期时间（秒），超过此时间未更新的轨迹将被清理
+        # 配置参数（默认值可由环境变量覆盖）
+        self.audio_window = AUDIO_WINDOW  # 音频窗口大小（秒）
+        self.audio_stride = AUDIO_STRIDE  # 音频步长（秒）
+        self.max_track_age = MAX_TRACK_AGE  # 人脸轨迹过期时间（秒），超过此时间未更新的轨迹将被清理
         # 帧率降采样：只保留间隔 >= 1/video_frame_rate 的帧，使任意摄像头帧率对齐到模型期望的 25fps
         self._min_frame_interval = 1.0 / self.video_frame_rate
         self._last_appended_video_time = {}  # track_id -> 上次写入 video_buffer 的时间戳
@@ -248,8 +277,8 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         current_voice_emb = None
         if self.voice_extractor is not None and effective_start is not None:
             try:
-                # 至少需要 0.5 秒的音频才能提取到较为合理的声纹嵌入特征
-                if (effective_end - effective_start) > 0.5:
+                # 至少需要 VOICEPRINT_MIN_AUDIO_SEC 秒的音频才能提取到较为合理的声纹嵌入特征
+                if (effective_end - effective_start) > VOICEPRINT_MIN_AUDIO_SEC:
                     current_voice_emb = self.voice_extractor.extract_from_samples(
                         audio_data.astype(np.float32) / 32768.0, 
                         sample_rate=self.audio_sample_rate
@@ -259,6 +288,31 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                     logger.critical(f"[VOICEPRINT] without extract_from_samples")
             except Exception as e:
                 logger.warning(f"声纹提取失败: {e}")
+
+        # --- 声纹快速匹配：若仅有唯一 track 匹配，直接判定说话人 ---
+        if current_voice_emb is not None and self.voice_profiles:
+            matched_tracks = []
+            for tid, profile_emb in self.voice_profiles.items():
+                sim = cosine_similarity(current_voice_emb, profile_emb)
+                logger.info(f"[VOICEPRINT-FAST] track={tid}, similarity={sim:.3f}")
+                if sim > VOICEPRINT_FAST_MATCH_THRESHOLD:
+                    matched_tracks.append((tid, sim))
+
+            if len(matched_tracks) == 1:
+                matched_tid, matched_sim = matched_tracks[0]
+                logger.info(f"[VOICEPRINT-FAST] 唯一匹配 track={matched_tid}, "
+                            f"similarity={matched_sim:.3f}, 直接判定为说话人")
+                fast_scores = {}
+                for track_id in self.video_buffer:
+                    if track_id == matched_tid:
+                        fast_scores[track_id] = float(matched_sim)
+                    else:
+                        fast_scores[track_id] = NON_MATCHED_TRACK_SCORE
+                # EMA 平滑更新匹配到的声纹档案
+                updated_emb = VOICEPRINT_EMA_ALPHA * self.voice_profiles[matched_tid] + (1 - VOICEPRINT_EMA_ALPHA) * current_voice_emb
+                updated_emb /= np.linalg.norm(updated_emb)
+                self.voice_profiles[matched_tid] = updated_emb
+                return fast_scores
 
         audio_feature_rate = int(1.0 / self.audio_stride)  # 音频特征帧率，通常为 100
 
@@ -348,25 +402,24 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                         similarity = cosine_similarity(current_voice_emb, profile_emb)
                         logger.critical(f"[VOICEPRINT] track={track_id}, similarity={similarity:.3f}, asd_score={asd_score:.3f}")
                         
-                        if similarity > 0.65:
+                        if similarity > VOICEPRINT_SIMILARITY_HIGH:
                             # 声音极度吻合，拉高分数弥补侧脸/嘴遮挡导致的 ASD 偏低
-                            final_score = max(asd_score, similarity * 0.9)
-                        elif similarity < 0.3:
+                            final_score = max(asd_score, similarity * VOICEPRINT_BOOST_WEIGHT)
+                        elif similarity < VOICEPRINT_SIMILARITY_LOW:
                             # 声音截然不同（可能是画外音），即使有唇动也判定为非本说话人
-                            final_score = asd_score * 0.3
+                            final_score = asd_score * VOICEPRINT_REJECT_SCALE
                         else:
                             # 模棱两可：保留混合趋势
-                            final_score = asd_score * 0.7 + similarity * 0.3
+                            final_score = asd_score * VOICEPRINT_BLEND_ASD + similarity * VOICEPRINT_BLEND_SIM
 
                 # 更新档案：若高精度 ASD 确认这人在说话
-                if final_score > 0.85 and current_voice_emb is not None:
+                if final_score > ASD_CONFIRM_SPEAKING_THRESHOLD and current_voice_emb is not None:
                     if track_id not in self.voice_profiles:
                         self.voice_profiles[track_id] = current_voice_emb
                         logger.info(f"[VOICEPRINT] track={track_id} 初始化声纹档案")
                     else:
                         # EMA 平滑更新
-                        alpha = 0.8
-                        updated_emb = alpha * self.voice_profiles[track_id] + (1 - alpha) * current_voice_emb
+                        updated_emb = VOICEPRINT_EMA_ALPHA * self.voice_profiles[track_id] + (1 - VOICEPRINT_EMA_ALPHA) * current_voice_emb
                         # 重新归一化
                         updated_emb /= np.linalg.norm(updated_emb)
                         self.voice_profiles[track_id] = updated_emb
