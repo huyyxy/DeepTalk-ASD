@@ -16,7 +16,7 @@ logger = DeepTalkLogger(__name__)
 
 
 class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
-    """Active Speaker Detection using LR-ASD ONNX models (pure onnxruntime, no PyTorch).
+    """基于 LR-ASD ONNX 模型的主动说话者检测 (纯 onnxruntime 实现，无 PyTorch 依赖)。
     
     使用 3 个独立的 ONNX 模型进行推理:
       - audio_frontend.onnx: 提取音频嵌入
@@ -26,13 +26,14 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
 
     def __init__(self, **kwargs):
         """
-        Initialize the LR-ASD ONNX speaker detector.
+        初始化 LR-ASD ONNX 说话者检测器。
 
         Args:
-            onnx_dir (str): ONNX 模型目录路径，默认 'LR_ASD_ONNX/weights'
-            device (str): 'cuda' 或 'cpu'
+            onnx_dir (str): ONNX 模型目录路径，默认 'weights'
+            device (str): 推理设备，'cuda' 或 'cpu'，默认 'cpu'
             video_frame_rate (int): 视频帧率，默认 25
             audio_sample_rate (int): 音频采样率，默认 16000
+            voiceprint_model_path (str): 声纹特征提取 ONNX 模型路径，默认查找 onnx_dir 下的 'wespeaker_zh_cnceleb_resnet34.onnx'
         """
         self.video_frame_rate = kwargs.get('video_frame_rate', 25)
         self.audio_sample_rate = kwargs.get('audio_sample_rate', 16000)
@@ -75,21 +76,21 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             f"(provider: {self.sess_audio.get_providers()[0]})"
         )
 
-        # Buffers for audio and video data
-        self.audio_buffer = deque(maxlen=16000 * 10)  # 10 seconds buffer
-        self.video_buffer = defaultdict(list)  # track_id -> list of (frame, timestamp)
-        self.last_face_timestamps = {}  # track_id -> last create time
+        # 音视频数据缓冲区
+        self.audio_buffer = deque(maxlen=16000 * 10)  # 10秒的音频缓冲区
+        self.video_buffer = defaultdict(list)  # 追踪ID -> (视频帧, 时间戳)列表
+        self.last_face_timestamps = {}  # 追踪ID -> 最后一次检测到人脸的时间
         
-        # Voiceprint profiles
-        self.voice_profiles = {}  # track_id -> embedding (np.ndarray)
+        # 声纹档案
+        self.voice_profiles = {}  # 追踪ID -> 对应的声纹嵌入特征 (np.ndarray)
         
         self.last_video_timestamp = 0.0
         self.last_audio_timestamp = 0.0
 
-        # Configuration
-        self.audio_window = 0.025  # seconds
-        self.audio_stride = 0.01  # seconds
-        self.max_track_age = 5.0  # seconds before considering a track stale
+        # 配置参数
+        self.audio_window = 0.025  # 音频窗口大小（秒）
+        self.audio_stride = 0.01  # 音频步长（秒）
+        self.max_track_age = 5.0  # 人脸轨迹过期时间（秒），超过此时间未更新的轨迹将被清理
         # 帧率降采样：只保留间隔 >= 1/video_frame_rate 的帧，使任意摄像头帧率对齐到模型期望的 25fps
         self._min_frame_interval = 1.0 / self.video_frame_rate
         self._last_appended_video_time = {}  # track_id -> 上次写入 video_buffer 的时间戳
@@ -119,12 +120,12 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                 continue
             self._last_appended_video_time[track_id] = create_time
 
-            # Resize to 112x112 grayscale
+            # 缩放至 112x112 灰度人脸图像
             resized_mouth_img = cv2.resize(face_img, (112, 112))
             self.video_buffer[track_id].append((resized_mouth_img, create_time))
             self.last_face_timestamps[track_id] = create_time
 
-        # Clean up old tracks
+        # 清理旧的轨迹数据
         self._cleanup_old_tracks()
 
     def append_audio(self, audio_chunk, create_time=None):
@@ -147,7 +148,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self.last_audio_timestamp = create_time
 
     def _cleanup_old_tracks(self):
-        """Remove tracks that haven't been updated recently."""
+        """移除近期未更新且已过期的人脸轨迹。"""
         current_time = time.perf_counter()
         stale_tracks = [
             track_id for track_id, last_time in self.last_face_timestamps.items()
@@ -164,7 +165,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                 del self.voice_profiles[track_id]
 
     def _preprocess_audio(self, audio_data=None):
-        """Convert raw audio buffer to MFCC features."""
+        """将原始音频缓冲区数据转换为 MFCC 特征。"""
         if audio_data is None:
             audio_data = np.array(list(self.audio_buffer), dtype=np.int16)
 
@@ -178,7 +179,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         return mfcc.astype(np.float32)
 
     def _preprocess_video(self, face_frames):
-        """Convert list of (mouth_img, timestamp) to numpy array."""
+        """将包含 (mouth_img, timestamp) 的列表转换为 numpy 数组。"""
         mouth_imgs = [frame[0] for frame in face_frames]
         return np.array(mouth_imgs, dtype=np.float32)
 
@@ -243,11 +244,11 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         if effective_start is None:
             audio_features = self._preprocess_audio()
 
-        # Voiceprint extraction for current audio chunk
+        # 为当前的音频块提取声纹特征
         current_voice_emb = None
         if self.voice_extractor is not None and effective_start is not None:
             try:
-                # Need at least 0.5s of audio to get a reasonable embedding
+                # 至少需要 0.5 秒的音频才能提取到较为合理的声纹嵌入特征
                 if (effective_end - effective_start) > 0.5:
                     current_voice_emb = self.voice_extractor.extract_from_samples(
                         audio_data.astype(np.float32) / 32768.0, 
@@ -259,12 +260,12 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             except Exception as e:
                 logger.warning(f"声纹提取失败: {e}")
 
-        audio_feature_rate = int(1.0 / self.audio_stride)  # 100
+        audio_feature_rate = int(1.0 / self.audio_stride)  # 音频特征帧率，通常为 100
 
         duration_set = [1, 2]
         # duration_set = [1, 2, 4, 6]
         # duration_set = [1, 2, 3, 4, 5, 6]
-        # duration_set = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6]  # To make the result more reliable
+        # duration_set = [1, 1, 1, 2, 2, 2, 3, 3, 4, 5, 6]  # 使结果更可靠
         all_scores = {}
 
         for track_id, face_frames in list(self.video_buffer.items()):
@@ -378,7 +379,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         return all_scores
 
     def reset(self):
-        """Reset the detector state."""
+        """重置检测器状态，清空所有缓冲区和档案。"""
         self.audio_buffer.clear()
         self.video_buffer.clear()
         self.last_face_timestamps.clear()
