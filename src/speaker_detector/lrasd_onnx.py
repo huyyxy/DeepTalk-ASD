@@ -34,6 +34,8 @@ VOICEPRINT_BLEND_ASD = float(os.getenv("LRASD_VOICEPRINT_BLEND_ASD", "0.7"))
 VOICEPRINT_BLEND_SIM = float(os.getenv("LRASD_VOICEPRINT_BLEND_SIM", "0.3"))
 # 声纹快速匹配中，未匹配到的 track 赋予的分数（通常为负表示未说话）
 NON_MATCHED_TRACK_SCORE = float(os.getenv("LRASD_NON_MATCHED_TRACK_SCORE", "-1.0"))
+# 声纹跳过 ASD 阈值：相似度低于此值的 track 直接跳过 ASD 计算以降低开销
+VOICEPRINT_SKIP_ASD_THRESHOLD = float(os.getenv("LRASD_VOICEPRINT_SKIP_ASD_THRESHOLD", "0.25"))
 # MFCC 提取的窗口长度（秒）
 AUDIO_WINDOW = float(os.getenv("LRASD_AUDIO_WINDOW", "0.025"))
 # MFCC 提取的帧移/步长（秒）
@@ -283,22 +285,29 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
 
     def _try_fast_voiceprint_match(self, current_voice_emb):
         """声纹快速匹配：若仅有唯一 track 匹配，直接返回得分字典。
+        同时标记与当前声纹差距特别大的 track，后续跳过其 ASD 计算。
 
         Returns:
-            dict 或 None — 匹配成功时返回 {track_id: score}，否则返回 None。
+            (fast_scores, skip_track_ids):
+                fast_scores: dict 或 None — 唯一匹配时返回 {track_id: score}，否则 None
+                skip_track_ids: set — 声纹相似度极低、应跳过 ASD 计算的 track 集合
         """
         if current_voice_emb is None or not self.voice_profiles:
-            return None
+            return None, set()
 
         matched_tracks = []
+        skip_track_ids = set()
         for tid, profile_emb in self.voice_profiles.items():
             sim = cosine_similarity(current_voice_emb, profile_emb)
             logger.info(f"[VOICEPRINT-FAST] track={tid}, similarity={sim:.3f}")
             if sim > VOICEPRINT_FAST_MATCH_THRESHOLD:
                 matched_tracks.append((tid, sim))
+            elif sim < VOICEPRINT_SKIP_ASD_THRESHOLD:
+                skip_track_ids.add(tid)
+                logger.info(f"[VOICEPRINT-FAST] track={tid} 声纹差距过大(sim={sim:.3f}), 跳过ASD计算")
 
         if len(matched_tracks) != 1:
-            return None
+            return None, skip_track_ids
 
         matched_tid, matched_sim = matched_tracks[0]
         logger.info(f"[VOICEPRINT-FAST] 唯一匹配 track={matched_tid}, "
@@ -309,7 +318,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             for track_id in self.video_buffer
         }
         self._update_voice_profile_ema(matched_tid, current_voice_emb)
-        return fast_scores
+        return fast_scores, skip_track_ids
 
     def _get_video_features_for_track(self, face_frames, effective_start, effective_end):
         """按时间范围过滤人脸帧并转为 numpy 数组。
@@ -457,8 +466,8 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         # 提取当前声纹嵌入 — 从音频中提取声纹特征
         current_voice_emb = self._extract_current_voice_embedding(audio_data, eff_start, eff_end)
 
-        # 声纹快速匹配 — 唯一 track 匹配时直接返回
-        fast_result = self._try_fast_voiceprint_match(current_voice_emb)
+        # 声纹快速匹配 — 唯一 track 匹配时直接返回；同时收集应跳过 ASD 的 track
+        fast_result, skip_track_ids = self._try_fast_voiceprint_match(current_voice_emb)
         if fast_result is not None:
             return fast_result
 
@@ -470,6 +479,11 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
 
         for track_id, face_frames in list(self.video_buffer.items()):
             if not face_frames:
+                continue
+
+            if track_id in skip_track_ids:
+                all_scores[track_id] = NON_MATCHED_TRACK_SCORE
+                logger.info(f"[LR-ASD-ONNX] track={track_id} 声纹差距过大, 跳过ASD推理")
                 continue
 
             video_features = self._get_video_features_for_track(face_frames, eff_start, eff_end)
