@@ -234,9 +234,210 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
 
         return scores
 
+    def _prepare_audio_features(self, start_time, end_time):
+        """根据时间范围裁切音频缓冲区并提取 MFCC 特征。
+
+        Returns:
+            (audio_features, audio_data, effective_start, effective_end)
+            当时间范围无效或超出缓冲区时，effective_start/effective_end 为 None，
+            audio_data 也为 None（此时使用整个缓冲区提取特征）。
+        """
+        if start_time is not None and end_time is not None:
+            buf_len = len(self.audio_buffer)
+            buffer_duration = buf_len / self.audio_sample_rate
+            buffer_end_time = self.last_audio_timestamp
+            buffer_start_time = buffer_end_time - buffer_duration
+
+            if end_time - start_time <= buffer_duration:
+                effective_start = max(start_time, buffer_start_time)
+                effective_end = min(end_time, buffer_end_time)
+                start_idx = max(0, int((effective_start - buffer_start_time) * self.audio_sample_rate))
+                end_idx = min(buf_len, int((effective_end - buffer_start_time) * self.audio_sample_rate))
+                audio_data = np.array(list(self.audio_buffer)[start_idx:end_idx], dtype=np.int16)
+                return self._preprocess_audio(audio_data), audio_data, effective_start, effective_end
+
+        return self._preprocess_audio(), None, None, None
+
+    def _extract_current_voice_embedding(self, audio_data, effective_start, effective_end):
+        """从当前音频片段中提取声纹嵌入。
+
+        Returns:
+            np.ndarray 或 None
+        """
+        if self.voice_extractor is None or effective_start is None:
+            return None
+        try:
+            if (effective_end - effective_start) > VOICEPRINT_MIN_AUDIO_SEC:
+                emb = self.voice_extractor.extract_from_samples(
+                    audio_data.astype(np.float32) / 32768.0,
+                    sample_rate=self.audio_sample_rate,
+                )
+                logger.critical("[VOICEPRINT] extract_from_samples success")
+                return emb
+            else:
+                logger.critical("[VOICEPRINT] without extract_from_samples")
+                return None
+        except Exception as e:
+            logger.warning(f"声纹提取失败: {e}")
+            return None
+
+    def _try_fast_voiceprint_match(self, current_voice_emb):
+        """声纹快速匹配：若仅有唯一 track 匹配，直接返回得分字典。
+
+        Returns:
+            dict 或 None — 匹配成功时返回 {track_id: score}，否则返回 None。
+        """
+        if current_voice_emb is None or not self.voice_profiles:
+            return None
+
+        matched_tracks = []
+        for tid, profile_emb in self.voice_profiles.items():
+            sim = cosine_similarity(current_voice_emb, profile_emb)
+            logger.info(f"[VOICEPRINT-FAST] track={tid}, similarity={sim:.3f}")
+            if sim > VOICEPRINT_FAST_MATCH_THRESHOLD:
+                matched_tracks.append((tid, sim))
+
+        if len(matched_tracks) != 1:
+            return None
+
+        matched_tid, matched_sim = matched_tracks[0]
+        logger.info(f"[VOICEPRINT-FAST] 唯一匹配 track={matched_tid}, "
+                    f"similarity={matched_sim:.3f}, 直接判定为说话人")
+
+        fast_scores = {
+            track_id: (float(matched_sim) if track_id == matched_tid else NON_MATCHED_TRACK_SCORE)
+            for track_id in self.video_buffer
+        }
+        self._update_voice_profile_ema(matched_tid, current_voice_emb)
+        return fast_scores
+
+    def _get_video_features_for_track(self, face_frames, effective_start, effective_end):
+        """按时间范围过滤人脸帧并转为 numpy 数组。
+
+        Returns:
+            np.ndarray 或 None（无有效帧时返回 None）
+        """
+        if effective_start is not None:
+            filtered = [(f, t) for f, t in face_frames if effective_start <= t <= effective_end]
+            if not filtered:
+                return None
+            return self._preprocess_video(filtered)
+        return self._preprocess_video(face_frames)
+
+    def _multi_duration_inference(self, audio_feat, video_feat, duration_set):
+        """对单个 track 执行多时长滑窗推理并汇总得分。
+
+        Args:
+            audio_feat: 对齐裁切后的 MFCC 特征 (T_a, 13)
+            video_feat: 对齐裁切后的灰度帧 (T_v, 112, 112)
+            duration_set: 需要尝试的窗口时长列表（秒）
+
+        Returns:
+            float 或 None — 多时长平均 ASD 分数
+        """
+        audio_feature_rate = int(1.0 / self.audio_stride)
+        length = min(
+            (audio_feat.shape[0] - audio_feat.shape[0] % 4) / audio_feature_rate,
+            video_feat.shape[0] / self.video_frame_rate,
+        )
+        num_frames = int(round(length * self.video_frame_rate))
+        audio_feat = audio_feat[:int(round(length * audio_feature_rate)), :]
+        video_feat = video_feat[:num_frames, :, :]
+
+        track_all_scores = []
+        for duration in duration_set:
+            scores = self._sliding_window_inference(
+                audio_feat, video_feat, duration, audio_feature_rate
+            )
+            if len(scores) >= num_frames:
+                track_all_scores.append(scores[:num_frames])
+
+        if not track_all_scores:
+            return None
+
+        avg_scores = np.round(np.mean(np.array(track_all_scores), axis=0), 1).astype(float)
+        return float(np.mean(avg_scores))
+
+    def _sliding_window_inference(self, audio_feat, video_feat, duration, audio_feature_rate):
+        """在给定时长窗口下对音视频特征执行滑窗推理。
+
+        Returns:
+            list[float]: 每帧的分数
+        """
+        length = min(
+            audio_feat.shape[0] / audio_feature_rate,
+            video_feat.shape[0] / self.video_frame_rate,
+        )
+        batch_size = int(math.ceil(length / duration))
+        scores = []
+
+        for i in range(batch_size):
+            a_start = i * duration * audio_feature_rate
+            a_end = (i + 1) * duration * audio_feature_rate
+            v_start = i * duration * self.video_frame_rate
+            v_end = (i + 1) * duration * self.video_frame_rate
+
+            audio_chunk = audio_feat[a_start:a_end, :]
+            video_chunk = video_feat[v_start:v_end, :, :]
+
+            if audio_chunk.shape[0] == 0 or video_chunk.shape[0] == 0:
+                continue
+
+            actual_v_frames = video_chunk.shape[0]
+            target_a_len = actual_v_frames * 4
+            if audio_chunk.shape[0] < target_a_len:
+                audio_chunk = np.pad(
+                    audio_chunk,
+                    ((0, target_a_len - audio_chunk.shape[0]), (0, 0)),
+                    'wrap',
+                )
+            audio_chunk = audio_chunk[:target_a_len, :]
+
+            t0 = time.perf_counter()
+            chunk_scores = self._run_inference(audio_chunk, video_chunk)
+            elapsed = time.perf_counter() - t0
+            logger.debug(f"[LR-ASD-ONNX] inference chunk cost {elapsed:.3f}s")
+
+            scores.extend(chunk_scores.flatten().tolist())
+
+        return scores
+
+    def _fuse_voiceprint_score(self, asd_score, track_id, current_voice_emb):
+        """将 ASD 分数与声纹相似度融合。
+
+        Returns:
+            float: 融合后的最终分数
+        """
+        if current_voice_emb is None:
+            return asd_score
+
+        profile_emb = self.voice_profiles.get(track_id)
+        if profile_emb is None:
+            return asd_score
+
+        similarity = cosine_similarity(current_voice_emb, profile_emb)
+        logger.critical(f"[VOICEPRINT] track={track_id}, similarity={similarity:.3f}, asd_score={asd_score:.3f}")
+
+        if similarity > VOICEPRINT_SIMILARITY_HIGH:
+            return max(asd_score, similarity * VOICEPRINT_BOOST_WEIGHT)
+        elif similarity < VOICEPRINT_SIMILARITY_LOW:
+            return asd_score * VOICEPRINT_REJECT_SCALE
+        else:
+            return asd_score * VOICEPRINT_BLEND_ASD + similarity * VOICEPRINT_BLEND_SIM
+
+    def _update_voice_profile_ema(self, track_id, voice_emb):
+        """EMA 平滑更新指定 track 的声纹档案。"""
+        if track_id not in self.voice_profiles:
+            self.voice_profiles[track_id] = voice_emb
+            logger.info(f"[VOICEPRINT] track={track_id} 初始化声纹档案")
+        else:
+            updated = VOICEPRINT_EMA_ALPHA * self.voice_profiles[track_id] + (1 - VOICEPRINT_EMA_ALPHA) * voice_emb
+            updated /= np.linalg.norm(updated)
+            self.voice_profiles[track_id] = updated
+
     def evaluate(self, start_time: float = None, end_time: float = None):
         """
-        评估当前活动说话者（多时长滑窗推理，参考 demo_onnx.py 的 run_multi_duration）。
+        评估当前活动说话者（多时长滑窗推理）。
 
         Args:
             start_time: 评估起始时间（time.perf_counter 时间戳），可选
@@ -251,70 +452,15 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         if not self.audio_buffer or not self.video_buffer:
             return {}
 
-        effective_start = None
-        effective_end = None
+        # 准备音频特征 — 根据时间范围裁切音频并提取 MFCC
+        audio_features, audio_data, eff_start, eff_end = self._prepare_audio_features(start_time, end_time)
+        # 提取当前声纹嵌入 — 从音频中提取声纹特征
+        current_voice_emb = self._extract_current_voice_embedding(audio_data, eff_start, eff_end)
 
-        if start_time is not None and end_time is not None:
-            buf_len = len(self.audio_buffer)
-            buffer_duration = buf_len / self.audio_sample_rate
-            buffer_end_time = self.last_audio_timestamp
-            buffer_start_time = buffer_end_time - buffer_duration
-
-            if end_time - start_time <= buffer_duration:
-                effective_start = max(start_time, buffer_start_time)
-                effective_end = min(end_time, buffer_end_time)
-
-                start_idx = max(0, int((effective_start - buffer_start_time) * self.audio_sample_rate))
-                end_idx = min(buf_len, int((effective_end - buffer_start_time) * self.audio_sample_rate))
-
-                audio_data = np.array(list(self.audio_buffer)[start_idx:end_idx], dtype=np.int16)
-                audio_features = self._preprocess_audio(audio_data)
-
-        if effective_start is None:
-            audio_features = self._preprocess_audio()
-
-        # 为当前的音频块提取声纹特征
-        current_voice_emb = None
-        if self.voice_extractor is not None and effective_start is not None:
-            try:
-                # 至少需要 VOICEPRINT_MIN_AUDIO_SEC 秒的音频才能提取到较为合理的声纹嵌入特征
-                if (effective_end - effective_start) > VOICEPRINT_MIN_AUDIO_SEC:
-                    current_voice_emb = self.voice_extractor.extract_from_samples(
-                        audio_data.astype(np.float32) / 32768.0, 
-                        sample_rate=self.audio_sample_rate
-                    )
-                    logger.critical(f"[VOICEPRINT] extract_from_samples success")
-                else:
-                    logger.critical(f"[VOICEPRINT] without extract_from_samples")
-            except Exception as e:
-                logger.warning(f"声纹提取失败: {e}")
-
-        # --- 声纹快速匹配：若仅有唯一 track 匹配，直接判定说话人 ---
-        if current_voice_emb is not None and self.voice_profiles:
-            matched_tracks = []
-            for tid, profile_emb in self.voice_profiles.items():
-                sim = cosine_similarity(current_voice_emb, profile_emb)
-                logger.info(f"[VOICEPRINT-FAST] track={tid}, similarity={sim:.3f}")
-                if sim > VOICEPRINT_FAST_MATCH_THRESHOLD:
-                    matched_tracks.append((tid, sim))
-
-            if len(matched_tracks) == 1:
-                matched_tid, matched_sim = matched_tracks[0]
-                logger.info(f"[VOICEPRINT-FAST] 唯一匹配 track={matched_tid}, "
-                            f"similarity={matched_sim:.3f}, 直接判定为说话人")
-                fast_scores = {}
-                for track_id in self.video_buffer:
-                    if track_id == matched_tid:
-                        fast_scores[track_id] = float(matched_sim)
-                    else:
-                        fast_scores[track_id] = NON_MATCHED_TRACK_SCORE
-                # EMA 平滑更新匹配到的声纹档案
-                updated_emb = VOICEPRINT_EMA_ALPHA * self.voice_profiles[matched_tid] + (1 - VOICEPRINT_EMA_ALPHA) * current_voice_emb
-                updated_emb /= np.linalg.norm(updated_emb)
-                self.voice_profiles[matched_tid] = updated_emb
-                return fast_scores
-
-        audio_feature_rate = int(1.0 / self.audio_stride)  # 音频特征帧率，通常为 100
+        # 声纹快速匹配 — 唯一 track 匹配时直接返回
+        fast_result = self._try_fast_voiceprint_match(current_voice_emb)
+        if fast_result is not None:
+            return fast_result
 
         duration_set = [1, 2]
         # duration_set = [1, 2, 4, 6]
@@ -326,107 +472,27 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             if not face_frames:
                 continue
 
-            if effective_start is not None:
-                filtered_frames = [(f, t) for f, t in face_frames
-                                   if effective_start <= t <= effective_end]
-                if not filtered_frames:
-                    continue
-                video_features = self._preprocess_video(filtered_frames)
-            else:
-                video_features = self._preprocess_video(face_frames)
+            video_features = self._get_video_features_for_track(face_frames, eff_start, eff_end)
+            if video_features is None:
+                continue
 
-            # 计算对齐后的有效长度（秒）
-            length = min(
-                (audio_features.shape[0] - audio_features.shape[0] % 4) / audio_feature_rate,
-                video_features.shape[0] / self.video_frame_rate,
-            )
-            num_frames = int(round(length * self.video_frame_rate))
-            audio_feat = audio_features[:int(round(length * audio_feature_rate)), :]
-            video_feat = video_features[:num_frames, :, :]
+            logger.info(f"[LR-ASD-ONNX] track={track_id}, "
+                        f"audio={audio_features.shape}, video={video_features.shape}")
 
-            logger.info(f"[LR-ASD-ONNX] track={track_id}, length={length:.2f}s, "
-                        f"audio={audio_feat.shape}, video={video_feat.shape}")
-
-            track_all_scores = []
-
-            for duration in duration_set:
-                batch_size = int(math.ceil(length / duration))
-                scores = []
-
-                for i in range(batch_size):
-                    a_start = i * duration * audio_feature_rate
-                    a_end = (i + 1) * duration * audio_feature_rate
-                    v_start = i * duration * self.video_frame_rate
-                    v_end = (i + 1) * duration * self.video_frame_rate
-
-                    audio_chunk = audio_feat[a_start:a_end, :]
-                    video_chunk = video_feat[v_start:v_end, :, :]
-
-                    if audio_chunk.shape[0] == 0 or video_chunk.shape[0] == 0:
-                        continue
-
-                    # 对齐音频帧到视频帧
-                    actual_v_frames = video_chunk.shape[0]
-                    target_a_len = actual_v_frames * 4
-                    if audio_chunk.shape[0] < target_a_len:
-                        audio_chunk = np.pad(
-                            audio_chunk,
-                            ((0, target_a_len - audio_chunk.shape[0]), (0, 0)),
-                            'wrap',
-                        )
-                    audio_chunk = audio_chunk[:target_a_len, :]
-
-                    t0 = time.perf_counter()
-                    chunk_scores = self._run_inference(audio_chunk, video_chunk)
-                    elapsed = time.perf_counter() - t0
-                    logger.debug(f"[LR-ASD-ONNX] inference chunk cost {elapsed:.3f}s")
-
-                    scores.extend(chunk_scores.flatten().tolist())
-
-                if len(scores) >= num_frames:
-                    track_all_scores.append(scores[:num_frames])
-
-            if track_all_scores:
-                avg_scores = np.round(
-                    np.mean(np.array(track_all_scores), axis=0), 1
-                ).astype(float)
-                asd_score = float(np.mean(avg_scores))
-                
-                # --- 声纹分数融合策略 (Score Fusion) ---
-                final_score = asd_score
-                if current_voice_emb is not None:
-                    # 获取该 track_id 历史声纹档案
-                    profile_emb = self.voice_profiles.get(track_id)
-                    
-                    if profile_emb is not None:
-                        similarity = cosine_similarity(current_voice_emb, profile_emb)
-                        logger.critical(f"[VOICEPRINT] track={track_id}, similarity={similarity:.3f}, asd_score={asd_score:.3f}")
-                        
-                        if similarity > VOICEPRINT_SIMILARITY_HIGH:
-                            # 声音极度吻合，拉高分数弥补侧脸/嘴遮挡导致的 ASD 偏低
-                            final_score = max(asd_score, similarity * VOICEPRINT_BOOST_WEIGHT)
-                        elif similarity < VOICEPRINT_SIMILARITY_LOW:
-                            # 声音截然不同（可能是画外音），即使有唇动也判定为非本说话人
-                            final_score = asd_score * VOICEPRINT_REJECT_SCALE
-                        else:
-                            # 模棱两可：保留混合趋势
-                            final_score = asd_score * VOICEPRINT_BLEND_ASD + similarity * VOICEPRINT_BLEND_SIM
-
-                # 更新档案：若高精度 ASD 确认这人在说话
-                if final_score > ASD_CONFIRM_SPEAKING_THRESHOLD and current_voice_emb is not None:
-                    if track_id not in self.voice_profiles:
-                        self.voice_profiles[track_id] = current_voice_emb
-                        logger.info(f"[VOICEPRINT] track={track_id} 初始化声纹档案")
-                    else:
-                        # EMA 平滑更新
-                        updated_emb = VOICEPRINT_EMA_ALPHA * self.voice_profiles[track_id] + (1 - VOICEPRINT_EMA_ALPHA) * current_voice_emb
-                        # 重新归一化
-                        updated_emb /= np.linalg.norm(updated_emb)
-                        self.voice_profiles[track_id] = updated_emb
-
-                all_scores[track_id] = float(final_score)
-            else:
+            # 单 track 多时长滑窗推理 — 对每个 track 做 ASD 推理
+            asd_score = self._multi_duration_inference(audio_features, video_features, duration_set)
+            if asd_score is None:
                 all_scores[track_id] = 0.0
+                continue
+
+            # 声纹分数融合 — 将 ASD 分数与声纹相似度融合
+            final_score = self._fuse_voiceprint_score(asd_score, track_id, current_voice_emb)
+
+            if final_score > ASD_CONFIRM_SPEAKING_THRESHOLD and current_voice_emb is not None:
+                # 更新声纹档案 — 确认说话后更新声纹
+                self._update_voice_profile_ema(track_id, current_voice_emb)
+
+            all_scores[track_id] = float(final_score)
 
         logger.info(f"[LR-ASD-ONNX] allScores => {all_scores}")
         return all_scores
