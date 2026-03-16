@@ -70,15 +70,8 @@ class ASD(ASDInterface):
         # 2. 转换为 SpeakerDetector 需要的格式: [{'id': track_id, 'image': face_gray}, ...]
         frame_faces = []
         for profile in face_profiles:
-            face_image = profile.face_image
-            if face_image is not None:
-                # 转换为灰度图
-                if len(face_image.shape) == 3:
-                    face_gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
-                else:
-                    face_gray = face_image
-                    face_gray = cv2.resize(face_gray, (224, 224))
-                    face_gray = face_gray[56:168, 56:168]  # 中心裁剪 112x112
+            face_gray = self._extract_mouth_image(profile)
+            if face_gray is not None:
                 frame_faces.append({
                     'id': profile.id,
                     'image': face_gray,
@@ -131,3 +124,84 @@ class ASD(ASDInterface):
     def reset(self):
         """重置系统状态"""
         self._speaker_detector.reset()
+
+    def _extract_mouth_image(self, profile: FaceProfile) -> np.ndarray:
+        """根据人脸和 5 个关键点，截取以嘴部为中心的 112x112 灰度人脸图像"""
+        face_image = profile.face_image
+        if face_image is None:
+            return None
+            
+        # 转换为灰度图
+        if len(face_image.shape) == 3:
+            face_gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
+        else:
+            face_gray = face_image.copy()
+            
+        h, w = face_gray.shape[:2]
+        if h <= 0 or w <= 0:
+            return face_gray
+
+        # 将灰度人脸统一 resize 到 224x224
+        # 这是为了确保人脸比例及大小相对恒定，无论原本截取的分辨率是多少
+        TARGET_SIZE = 224
+        CROP_SIZE = 112
+        face_gray_resized = cv2.resize(face_gray, (TARGET_SIZE, TARGET_SIZE))
+
+        # 如果有五点标记，基于关键点计算嘴部中心
+        pts = profile.five_key_points
+        if pts is not None and len(pts) >= 5:
+            start_x = max(int(profile.face_rectangle.x), 0)
+            start_y = max(int(profile.face_rectangle.y), 0)
+            
+            mouth_left = pts[3]
+            mouth_right = pts[4]
+            mouth_cx_abs = (mouth_left[0] + mouth_right[0]) / 2.0
+            mouth_cy_abs = (mouth_left[1] + mouth_right[1]) / 2.0
+            
+            mouth_cx_local = mouth_cx_abs - start_x
+            mouth_cy_local = mouth_cy_abs - start_y
+            
+            # 缩放到 224 尺寸下的坐标
+            mouth_cx_scaled = int(mouth_cx_local * (TARGET_SIZE / w))
+            mouth_cy_scaled = int(mouth_cy_local * (TARGET_SIZE / h))
+        else:
+            # 没有关键点则默认在正下半部分中心截取
+            mouth_cx_scaled = TARGET_SIZE // 2
+            mouth_cy_scaled = TARGET_SIZE // 2 + TARGET_SIZE // 4
+
+        half_c = CROP_SIZE // 2
+        crop_x1 = mouth_cx_scaled - half_c
+        crop_y1 = mouth_cy_scaled - half_c
+        crop_x2 = mouth_cx_scaled + half_c
+        crop_y2 = mouth_cy_scaled + half_c
+        
+        # 边界挪移：如果某一边超出边界，向反方向移回差值，保证一定能截取到 CROP_SIZE 宽高
+        if crop_x1 < 0:
+            crop_x2 += (0 - crop_x1)
+            crop_x1 = 0
+        if crop_x2 > TARGET_SIZE:
+            crop_x1 -= (crop_x2 - TARGET_SIZE)
+            crop_x2 = TARGET_SIZE
+            
+        if crop_y1 < 0:
+            crop_y2 += (0 - crop_y1)
+            crop_y1 = 0
+        if crop_y2 > TARGET_SIZE:
+            crop_y1 -= (crop_y2 - TARGET_SIZE)
+            crop_y2 = TARGET_SIZE
+            
+        crop_x1 = max(0, crop_x1)
+        crop_y1 = max(0, crop_y1)
+        crop_x2 = min(TARGET_SIZE, crop_x2)
+        crop_y2 = min(TARGET_SIZE, crop_y2)
+        
+        mouth_crop = face_gray_resized[crop_y1:crop_y2, crop_x1:crop_x2]
+        
+        # 防呆逻辑：若不是 112x112 则 fallback 为强行 resize（一般在边界挪移后不会触发）
+        if mouth_crop.shape[0] != CROP_SIZE or mouth_crop.shape[1] != CROP_SIZE:
+            try:
+                mouth_crop = cv2.resize(mouth_crop, (CROP_SIZE, CROP_SIZE))
+            except Exception:
+                pass
+                
+        return mouth_crop

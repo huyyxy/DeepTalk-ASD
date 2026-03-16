@@ -120,9 +120,17 @@ class InspireFaceDetector(FaceDetectorInterface):
             x1, y1, x2, y2 = face.location
             width = x2 - x1
             height = y2 - y1
-
             face_image_bgr = self._face_area(image, x1, y1, width, height)
             expand_face_image_bgr = self._expand_face_area_by_ratio(image, x1, y1, width, height, expand_ratio=1)
+
+            five_key_points = None
+            try:
+                # 获取 5 个关键点 (双目、鼻头、两嘴角)
+                pts5 = self.session.get_face_five_key_points(face)
+                if pts5 is not None and isinstance(pts5, np.ndarray) and pts5.shape == (5, 2):
+                    five_key_points = [(float(pt[0]), float(pt[1])) for pt in pts5]
+            except Exception:
+                pass
 
             if exts is None:
                 continue
@@ -177,6 +185,7 @@ class InspireFaceDetector(FaceDetectorInterface):
                 age=age_bracket_tags[ext.age_bracket],
                 emotion=emotion,
                 face_image=face_image_bgr,
+                five_key_points=five_key_points,
                 expand_face_image=expand_face_image_bgr,
                 face_image_score=ext.quality_confidence,
                 best_face_image=best_face_image,

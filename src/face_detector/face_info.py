@@ -48,6 +48,7 @@ class FaceProfile:
     age: str
     emotion: str
     face_image: Optional[np.ndarray] = None
+    five_key_points: Optional[list] = None
     expand_face_image: Optional[np.ndarray] = None
     face_image_score: float = 0.0
     best_face_image: Optional[np.ndarray] = None
@@ -79,6 +80,7 @@ class FaceProfile:
             "age": self.age,
             "emotion": self.emotion,
             "face_image": self.face_image,
+            "five_key_points": self.five_key_points,
             "expand_face_image": self.expand_face_image,
             "face_image_score": self.face_image_score,
             "best_face_image": self.best_face_image,
