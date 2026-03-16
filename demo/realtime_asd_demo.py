@@ -284,7 +284,7 @@ class AudioCaptureThread(threading.Thread):
                     if self._confirmed_has_speaker:
                         # TURN_CONFIRMED 时已检测到说话人，结束持久绿框
                         self._state_tracker.clear_persistent_speakers()
-                        print(f"[ASD] TURN_END: 清除持久说话人")
+                        print(f"[ASD] TURN_END: 将代表说话人绿框改为红色")
                     else:
                         # TURN_CONFIRMED 时未检测到说话人，再检测一次
                         full_duration = utterance.duration_seconds()
