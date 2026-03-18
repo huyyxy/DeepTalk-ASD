@@ -1,12 +1,13 @@
 import os
 import numpy as np
 from collections import deque, defaultdict
+from typing import List, Optional, Union
 import time
 import cv2
 import math
 import python_speech_features
 import onnxruntime as ort
-from .interface import SpeakerDetectorInterface
+from .interface import SpeakerDetectorInterface, FaceData
 
 from .voiceprint import SpeakerEmbeddingExtractor, cosine_similarity
 
@@ -126,7 +127,7 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         self._min_frame_interval = 1.0 / self.video_frame_rate
         self._last_appended_video_time = {}  # track_id -> 上次写入 video_buffer 的时间戳
 
-    def append_video(self, frame_faces, create_time=None):
+    def append_video(self, face_data_list: List[FaceData], create_time: Optional[float] = None):
         """
         添加视频帧中已检测的人脸信息。
 
@@ -134,32 +135,33 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         使高帧率摄像头（如 30fps）输入在 buffer 中等效为 25fps，与模型训练时的音视频对齐一致。
 
         Args:
-            frame_faces: 当前帧的人脸检测结果列表，每个元素为 {'id': tracker_id, 'image': face_gray}
+            face_data_list: 当前帧的人脸数据列表 (FaceData)
             create_time: 帧的创建时间
         """
         if create_time is None:
             create_time = time.perf_counter()
         self.last_video_timestamp = create_time
 
-        for face in frame_faces:
-            track_id = face['id']
-            face_img = face['image']
+        for face_data in face_data_list:
+            track_id = face_data.id
 
-            # 帧率降采样：该 track 距上次写入已超过 min_frame_interval 才写入
             last_ts = self._last_appended_video_time.get(track_id, -float('inf'))
             if create_time - last_ts < self._min_frame_interval:
                 continue
             self._last_appended_video_time[track_id] = create_time
 
-            # 缩放至 112x112 灰度人脸图像
-            resized_mouth_img = cv2.resize(face_img, (112, 112))
-            self.video_buffer[track_id].append((resized_mouth_img, create_time))
-            self.last_face_timestamps[track_id] = create_time
+            mouth_img = self._extract_mouth_image(face_data)
+            if mouth_img is not None:
+                self.video_buffer[track_id].append((mouth_img, create_time))
+                self.last_face_timestamps[track_id] = create_time
 
-        # 清理旧的轨迹数据
         self._cleanup_old_tracks()
 
-    def append_audio(self, audio_chunk, create_time=None):
+    def append_audio(
+        self,
+        audio_chunk: Union[np.ndarray, bytes, bytearray],
+        create_time: Optional[float] = None,
+    ):
         """
         添加音频块到处理队列。
 
@@ -194,6 +196,79 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
                 del self._last_appended_video_time[track_id]
             if track_id in self.voice_profiles:
                 del self.voice_profiles[track_id]
+
+    def _extract_mouth_image(self, face_data: FaceData) -> np.ndarray:
+        """根据人脸和 5 个关键点，截取以嘴部为中心的 112x112 灰度人脸图像。"""
+        face_image = face_data.face_image
+        if face_image is None:
+            return None
+
+        if len(face_image.shape) == 3:
+            face_gray = cv2.cvtColor(face_image, cv2.COLOR_BGR2GRAY)
+        else:
+            face_gray = face_image.copy()
+
+        h, w = face_gray.shape[:2]
+        if h <= 0 or w <= 0:
+            return face_gray
+
+        TARGET_SIZE = 224
+        CROP_SIZE = 112
+        face_gray_resized = cv2.resize(face_gray, (TARGET_SIZE, TARGET_SIZE))
+
+        pts = face_data.five_key_points
+        if pts is not None and len(pts) >= 5:
+            start_x = max(int(face_data.face_rect_x), 0)
+            start_y = max(int(face_data.face_rect_y), 0)
+
+            mouth_left = pts[3]
+            mouth_right = pts[4]
+            mouth_cx_abs = (mouth_left[0] + mouth_right[0]) / 2.0
+            mouth_cy_abs = (mouth_left[1] + mouth_right[1]) / 2.0
+
+            mouth_cx_local = mouth_cx_abs - start_x
+            mouth_cy_local = mouth_cy_abs - start_y
+
+            mouth_cx_scaled = int(mouth_cx_local * (TARGET_SIZE / w))
+            mouth_cy_scaled = int(mouth_cy_local * (TARGET_SIZE / h))
+        else:
+            mouth_cx_scaled = TARGET_SIZE // 2
+            mouth_cy_scaled = TARGET_SIZE // 2 + TARGET_SIZE // 4
+
+        half_c = CROP_SIZE // 2
+        crop_x1 = mouth_cx_scaled - half_c
+        crop_y1 = mouth_cy_scaled - half_c
+        crop_x2 = mouth_cx_scaled + half_c
+        crop_y2 = mouth_cy_scaled + half_c
+
+        if crop_x1 < 0:
+            crop_x2 += (0 - crop_x1)
+            crop_x1 = 0
+        if crop_x2 > TARGET_SIZE:
+            crop_x1 -= (crop_x2 - TARGET_SIZE)
+            crop_x2 = TARGET_SIZE
+
+        if crop_y1 < 0:
+            crop_y2 += (0 - crop_y1)
+            crop_y1 = 0
+        if crop_y2 > TARGET_SIZE:
+            crop_y1 -= (crop_y2 - TARGET_SIZE)
+            crop_y2 = TARGET_SIZE
+
+        crop_x1 = max(0, crop_x1)
+        crop_y1 = max(0, crop_y1)
+        crop_x2 = min(TARGET_SIZE, crop_x2)
+        crop_y2 = min(TARGET_SIZE, crop_y2)
+
+        mouth_crop = face_gray_resized[crop_y1:crop_y2, crop_x1:crop_x2]
+
+        if mouth_crop.shape[0] != CROP_SIZE or mouth_crop.shape[1] != CROP_SIZE:
+            try:
+                mouth_crop = cv2.resize(mouth_crop, (CROP_SIZE, CROP_SIZE))
+            except Exception:
+                pass
+
+        return mouth_crop
 
     def _preprocess_audio(self, audio_data=None):
         """将原始音频缓冲区数据转换为 MFCC 特征。"""
