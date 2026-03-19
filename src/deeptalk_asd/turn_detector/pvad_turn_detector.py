@@ -45,7 +45,7 @@ class PVADTurnDetector(TurnDetectorInterface):
         *,
         model_dir: str,
         pvad_model_name: str = "pvad.onnx",
-        spk_model_name: str = "speaker_model.onnx",
+        spk_model_name: str = "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
         pvad_threshold: float = 0.35,
         min_low_frames: int = 30,
         cooldown_frames: int = 50,
