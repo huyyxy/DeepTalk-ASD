@@ -29,11 +29,6 @@ class TurnDetectorFactory:
                 detector = SileroVadTurnDetector(**self.kwargs)
                 logger.info("use Silero VAD turn detector")
                 return detector
-            elif self.type == 'LR-ASD-ONNX':
-                from speaker_detector.lrasd_onnx import LRASDOnnxSpeakerDetector
-                detector = LRASDOnnxSpeakerDetector(**self.kwargs)
-                logger.info("use LR-ASD-ONNX model")
-                return detector
         except Exception as e:
             traceback.print_exc()
         return None
