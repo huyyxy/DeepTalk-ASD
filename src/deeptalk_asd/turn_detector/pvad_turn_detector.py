@@ -143,12 +143,6 @@ class PVADTurnDetector(TurnDetectorInterface):
             return utterance
 
         pvad_prob = self._run_pvad(audio_frame)
-
-        logger.info(
-                f"[pVAD] 目标说话人说话检测, prob={pvad_prob:.3f}, "
-                f"连续低帧数={self._low_count}"
-            )
-
         if pvad_prob < self._threshold:
             self._low_count += frame_count
             logger.warning(
