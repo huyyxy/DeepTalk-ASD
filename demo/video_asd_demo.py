@@ -193,15 +193,25 @@ def create_asd(args):
     model_dir = args.model_dir or os.path.join(PROJECT_ROOT, "weights")
 
     face_detector_config = {"type": args.face_detector}
-    turn_detector_config = {
-        "type": args.turn_detector,
+
+    vad_params = {
         "model_dir": model_dir,
         "prefix_padding_ms": int(EVAL_PREFIX_TRIM_SEC * 1000),
         "abs_amplitude_threshold": args.abs_amplitude_threshold,
         "silence_duration_ms": int(EVAL_SUFFIX_TRIM_SEC * 1000),
     }
     if args.vad_model_name:
-        turn_detector_config["model_name"] = args.vad_model_name
+        vad_params["model_name"] = args.vad_model_name
+
+    if args.turn_detector == "pvad":
+        turn_detector_config = {
+            "type": "pvad",
+            "model_dir": model_dir,
+            "vad": {"type": "silero-vad", **vad_params},
+        }
+    else:
+        turn_detector_config = {"type": args.turn_detector, **vad_params}
+
     speaker_detector_config = {
         "type": args.speaker_detector,
         "model_dir": model_dir,

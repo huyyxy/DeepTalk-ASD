@@ -418,29 +418,22 @@ def create_asd(args):
         "type": args.face_detector,
     }
 
+    vad_params = {
+        "model_dir": model_dir,
+        "abs_amplitude_threshold": args.abs_amplitude_threshold,
+    }
+    if args.vad_model_name:
+        vad_params["model_name"] = args.vad_model_name
+
     if args.turn_detector == "pvad":
-        # pVAD 装饰器模式：内层 VAD 配置嵌套在 "vad" key 下
-        vad_inner_config = {
-            "type": "silero-vad",
-            "model_dir": model_dir,
-            "abs_amplitude_threshold": args.abs_amplitude_threshold,
-        }
-        if args.vad_model_name:
-            vad_inner_config["model_name"] = args.vad_model_name
         turn_detector_config = {
             "type": "pvad",
-            "pvad_model_dir": model_dir,
+            "model_dir": model_dir,
             "spk_model_name": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
-            "vad": vad_inner_config,
+            "vad": {"type": "silero-vad", **vad_params},
         }
     else:
-        turn_detector_config = {
-            "type": args.turn_detector,
-            "model_dir": model_dir,
-            "abs_amplitude_threshold": args.abs_amplitude_threshold,
-        }
-        if args.vad_model_name:
-            turn_detector_config["model_name"] = args.vad_model_name
+        turn_detector_config = {"type": args.turn_detector, **vad_params}
 
     speaker_detector_config = {
         "type": args.speaker_detector,
