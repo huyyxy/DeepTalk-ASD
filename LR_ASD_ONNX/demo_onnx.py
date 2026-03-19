@@ -6,13 +6,13 @@ LR-ASD ONNX 推理示例
 
 用法:
     # 从视频文件推理（需包含人脸画面和音频）
-    python demo_onnx.py --video path/to/face_clip.avi --onnx_dir onnx_output
+    python3 demo_onnx.py --video path/to/face_clip.avi --onnx_dir onnx_output
 
     # 从分离的音频和视频帧目录推理
-    python demo_onnx.py --audio path/to/audio.wav --frames_dir path/to/face_frames/ --onnx_dir onnx_output
+    python3 demo_onnx.py --audio path/to/audio.wav --frames_dir path/to/face_frames/ --onnx_dir onnx_output
 
     # 使用随机数据快速验证模型能否正常运行
-    python demo_onnx.py --onnx_dir onnx_output --dummy
+    python3 demo_onnx.py --onnx_dir onnx_output --dummy
 
 输入要求:
     - 视频: 包含单个人脸的裁剪视频片段（25fps），或人脸帧图片目录
