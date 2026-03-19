@@ -1,27 +1,35 @@
 # DeepTalk-ASD
 
-[LR-ASD](https://github.com/Junhua-Liao/LR-ASD) is a SOTA Active Speaker Detection (ASD) model. While it offers exceptional performance, the official open-source project relies on GPUs and relatively older face detection models. This project aims to provide a production-ready, out-of-the-box ASD system.
+[LR-ASD](https://github.com/Junhua-Liao/LR-ASD) is a SOTA Active Speaker Detection (ASD) model. Building upon LR-ASD, this project provides an industrial-grade ASD system featuring **full-pipeline ONNX conversion, integrated speaker verification, and real-time processing support**. It runs efficiently on CPUs without relying on large PyTorch/GPU environments.
 
 ---
 
-DeepTalk-ASD is an efficient Active Speaker Detection (ASD) system. By fusing audio and video features, it determines in real-time which face in a video frame is speaking.
+DeepTalk-ASD is an efficient Active Speaker Detection (ASD) system. By fusing audio, video features, and speaker embeddings, it determines in real-time which face in a video frame is speaking.
 
 ## Key Features
 
-- **Multimodal Fusion**: Combines face detection, voice activity detection (VAD), and speaker identification models.
+- **Multimodal Fusion**: Deeply integrates face detection, voice activity detection (VAD), audio-visual ASD models, and **Speaker Embeddings**.
+- **Speaker Verification Enhancement (New)**: 
+    - **Feature Fusion**: Weighted fusion of ASD probability and audio speaker similarity to effectively suppress off-screen voice interference.
+    - **Fast Matching**: Supports accelerated determination for tracks with known speaker embeddings, skipping complex calculations.
+    - **Automatic Profile Update**: Automatically updates speaker embedding profiles for detected speakers using EMA (Exponential Moving Average).
 - **Modular Design**: 
-    - **FaceDetector**: Detects and tracks faces (supports InspireFace).
-    - **TurnDetector**: Audio VAD detection (supports Silero VAD).
-    - **SpeakerDetector**: Audio-visual feature fusion and decision making (based on LR-ASD).
-- **High Performance**: Supports ONNX inference, suitable for real-time applications.
-- **Easy to Use**: Provides command-line demos supporting real-time camera input and video file processing.
+    - **FaceDetector**: Provides face detection and tracking (currently supports InspireFace).
+    - **TurnDetector**: Audio VAD and turn management (integrates Silero VAD).
+    - **SpeakerDetector**: Core decision layer performing audio-visual feature extraction, fusion decision, and speaker comparison (based on LR-ASD ONNX).
+- **High Performance**: Full-pipeline ONNX inference optimized for CPU, supporting real-time operation on mobile devices or standard laptops.
+- **Multiple Scenarios**: Provides demos for real-time camera, video files, speaker embedding extraction, and pVAD.
 
 ## System Architecture
 
-The system is orchestrated through three main sub-components:
-1. **FaceDetector**: Responsible for locating faces in each video frame.
-2. **TurnDetector**: Responsible for determining if the current audio stream contains speech.
-3. **SpeakerDetector**: The core decision layer that calculates speaking probability based on VAD results and face image sequences.
+The system works through three main sub-components:
+1. **Face Detection (FaceDetector)**: Locates and tracks faces (Tracks) in each video frame.
+2. **Turn Detection (TurnDetector)**: Determines if the current audio stream contains speech segments and manages their lifecycle (START, CONTINUE, END).
+3. **Speaker Detection (SpeakerDetector)**: 
+    - Extracts audio MFCC features and 112x112 grayscale mouth images.
+    - Uses **Sherpa-ONNX** to extract speaker embeddings (Voiceprint).
+    - Calculates raw ASD scores through a three-stage ONNX model (Audio/Visual Frontend + AV Backend).
+    - Final scores are dynamically fused from ASD scores and speaker matching scores.
 
 ## Quick Start
 
@@ -34,65 +42,70 @@ Python 3.8 or higher is recommended.
 git clone <repository_url>
 cd DeepTalk-ASD
 
-# Install dependencies
+# Install core dependencies
 python3 -m pip install -r requirements.txt
 
 # Install the project in editable mode
 pip3 install -e .
 ```
 
-### 2. Verify Installation
+### 2. Model Weights
 
-Check the installation via the Python interactive environment:
+Ensure the `weights` directory contains the following ONNX model files:
 
-```python
-python3
->>> import deeptalk_asd
->>> print(deeptalk_asd.__version__)
-```
+| Category | Filename | Description |
+| :--- | :--- | :--- |
+| **LR-ASD** | `audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx` | Core Audio-Visual ASD models |
+| **VAD** | `silero_vad.onnx` | Voice Activity Detection model |
+| **Face** | `Pikachu` (directory) | Resources for InspireFace detection |
+| **Voiceprint** | `wespeaker_zh_cnceleb_resnet34.onnx` | [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) Speaker Embedding model (Recommended) |
 
-### 3. Model Weights
+### 3. Running Demos
 
-Ensure the `weights` directory contains the necessary model files. The project includes support for converting models to ONNX.
-- `Pikachu`: InspireFace related models.
-- `silero_vad.onnx`: Silero VAD model.
-- LR-ASD related models: `audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx`.
+#### Core ASD Demos
 
-### 4. Running Demos
-
-#### Video File Processing Demo
-```bash
-python3 demo/video_asd_demo.py --input demo/demo.mp4 --display
-```
-
-#### Real-time Camera Demo
-```bash
-python3 demo/realtime_asd_demo.py
-```
+*   **Real-time Camera Demo** (Recommended first choice):
+    ```bash
+    python3 demo/realtime_asd_demo.py
+    ```
+*   **Offline Video File Processing**:
+    ```bash
+    python3 demo/video_asd_demo.py --input demo/demo.mp4 --display
+    ```
 
 ## Configuration
 
-The components can be flexibly configured using the factory method:
+Control components and their parameters precisely through the factory method:
 
 ```python
 from deeptalk_asd import ASDDetectorFactory
 
 config = {
-    "face_detector": {"type": "inspireface"},
-    "turn_detector": {"type": "silero-vad", "model_path": "weights/silero_vad.onnx"},
-    "speaker_detector": {"type": "LR-ASD-ONNX", "onnx_dir": "weights"}
+    "face_detector": {
+        "type": "inspireface",
+        "device": "cpu"
+    },
+    "turn_detector": {
+        "type": "silero-vad", 
+        "model_path": "weights/silero_vad.onnx"
+    },
+    "speaker_detector": {
+        "type": "LR-ASD-ONNX", 
+        "onnx_dir": "weights",
+        "voiceprint_model_path": "weights/wespeaker_zh_cnceleb_resnet34.onnx"
+    }
 }
 
-factory = ASDDetectorFactory(**config)
-asd = factory.create()
+asd = ASDDetectorFactory(**config).create()
 ```
 
 ## License
 
-The code in this project is licensed under the **MIT License**. However, please note that the integrated models and their related code are subject to their respective licenses:
+The code in this project is licensed under the **MIT License**. However, the integrated pre-trained models are subject to their respective licenses:
 
-1. **InspireFace**: Core code is MIT, but the provided pre-trained models are typically restricted to **non-commercial research use**. For commercial use, please refer to [InsightFace](https://github.com/deepinsight/insightface) documentation.
-2. **Silero VAD**: Licensed under the **MIT License**. Please refer to [Silero VAD](https://github.com/snakers4/silero-vad).
-3. **LR-ASD**: Licensed under the **MIT License**. Please refer to [LR-ASD](https://github.com/Junhua-Liao/LR-ASD).
+1.  **InspireFace**: Code is open-source, but weight files are typically restricted to **non-commercial research**. Please check official terms for commercial use.
+2.  **Silero VAD**: Licensed under the **MIT License**.
+3.  **LR-ASD**: Licensed under the **MIT License**.
+4.  **Sherpa-ONNX**: Licensed under the **Apache-2.0 License**.
 
-While you may redistribute the code of this project under the MIT license, you must explicitly inform users in the documentation that: **When using specific pre-trained models (especially face detection models), users must comply with the non-commercial restrictions of the original authors.** If commercialization is required, users should replace them with commercially-friendly models or contact the original authors for authorization.
+**Note**: When releasing or commercializing applications based on this project, you must verify the license compliance for each model's weights.

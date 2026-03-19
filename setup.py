@@ -8,10 +8,15 @@ package_dir = {"deeptalk_asd": "src"}
 for pkg in sub_packages:
     package_dir[f"deeptalk_asd.{pkg}"] = f"src/{pkg.replace('.', '/')}"
 
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
+
 setup(
     name="deeptalk_asd",
-    version="0.2.0",
+    version="0.3.0",
     description="DeepTalk Active Speaker Detection",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     package_dir=package_dir,
     packages=["deeptalk_asd"] + [f"deeptalk_asd.{pkg}" for pkg in sub_packages],
     python_requires=">=3.8",
