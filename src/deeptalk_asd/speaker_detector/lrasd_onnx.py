@@ -61,18 +61,29 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
         初始化 LR-ASD ONNX 说话者检测器。
 
         Args:
-            onnx_dir (str): ONNX 模型目录路径，默认 'weights'
+            onnx_dir (str): ONNX 模型目录路径，默认自动从缓存加载
             device (str): 推理设备，'cuda' 或 'cpu'，默认 'cpu'
             video_frame_rate (int): 视频帧率，默认 25
             audio_sample_rate (int): 音频采样率，默认 16000
-            voiceprint_model_path (str): 声纹特征提取 ONNX 模型路径，默认查找 onnx_dir 下的 'wespeaker_zh_cnceleb_resnet34.onnx'
+            voiceprint_model_path (str): 声纹特征提取 ONNX 模型路径，默认自动从缓存加载
         """
         self.video_frame_rate = kwargs.get('video_frame_rate', 25)
         self.audio_sample_rate = kwargs.get('audio_sample_rate', 16000)
         device = kwargs.get('device', 'cpu')
         onnx_dir = kwargs.get('onnx_dir', 'weights')
-        default_voiceprint_model_path = os.path.join(onnx_dir, 'wespeaker_zh_cnceleb_resnet34.onnx')
-        voiceprint_model_path = kwargs.get('voiceprint_model_path', default_voiceprint_model_path)
+        voiceprint_model_path = kwargs.get('voiceprint_model_path', None)
+
+        # 解析声纹模型路径：参数指定 > onnx_dir 下查找 > 自动下载
+        if voiceprint_model_path is None:
+            default_path = os.path.join(onnx_dir, 'wespeaker_zh_cnceleb_resnet34.onnx')
+            if os.path.exists(default_path):
+                voiceprint_model_path = default_path
+            else:
+                try:
+                    from ..model_manager import ensure_model
+                    voiceprint_model_path = str(ensure_model("wespeaker_zh_cnceleb_resnet34.onnx"))
+                except Exception as e:
+                    logger.warning(f"无法自动获取声纹模型: {e}")
 
         # Voiceprint Integration
         self.voice_extractor = None
