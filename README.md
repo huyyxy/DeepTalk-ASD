@@ -57,7 +57,7 @@ Ensure the `weights` directory contains the following ONNX model files:
 | :--- | :--- | :--- |
 | **LR-ASD** | `audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx` | Core Audio-Visual ASD models |
 | **VAD** | `silero_vad.onnx` | Voice Activity Detection model |
-| **Face** | `Pikachu` (directory) | Resources for InspireFace detection |
+| **Face** | `Pikachu` | Resources for InspireFace detection |
 | **Voiceprint** | `wespeaker_zh_cnceleb_resnet34.onnx` | [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) Speaker Embedding model (Recommended) |
 
 ### 3. Running Demos

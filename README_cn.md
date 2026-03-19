@@ -57,7 +57,7 @@ pip3 install -e .
 | :--- | :--- | :--- |
 | **LR-ASD** | `audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx` | 音视频 ASD 核心模型 |
 | **VAD** | `silero_vad.onnx` | 语音轮次检测模型 |
-| **Face** | `Pikachu` (目录) | InspireFace 人脸检测所需资源 |
+| **Face** | `Pikachu` | InspireFace 人脸检测所需资源 |
 | **Voiceprint** | `wespeaker_zh_cnceleb_resnet34.onnx` | [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) 声纹提取模型 (推荐) |
 
 ### 3. 运行 Demos
