@@ -121,16 +121,16 @@ asd = ASDDetectorFactory().create()
 config = {
     "face_detector": {
         "type": "inspireface",
-        "device": "cpu"
+        "model_dir": "weights"
     },
     "turn_detector": {
         "type": "silero-vad", 
-        "model_path": "weights/silero_vad.onnx"
+        "model_dir": "weights"
     },
     "speaker_detector": {
         "type": "LR-ASD-ONNX", 
-        "onnx_dir": "weights",
-        "voiceprint_model_path": "weights/wespeaker_zh_cnceleb_resnet34.onnx"
+        "model_dir": "weights",
+        "voiceprint_model_name": "wespeaker_zh_cnceleb_resnet34.onnx"
     }
 }
 
