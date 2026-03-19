@@ -47,7 +47,7 @@ class PVADTurnDetector(TurnDetectorInterface):
         pvad_model_name: str = "pvad.onnx",
         spk_model_name: str = "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
         pvad_threshold: float = 0.35,
-        min_low_frames: int = 30,
+        min_low_frames: int = 10,
         cooldown_frames: int = 50,
     ):
         """
@@ -136,14 +136,20 @@ class PVADTurnDetector(TurnDetectorInterface):
         if not self._active or utterance.turn_state != TurnState.TURN_CONTINUE:
             return utterance
 
+        # 将帧时长(毫秒)转换为10ms帧数(每帧10ms)
+        frame_count = audio_frame.duration_ms // 10
         if self._cooldown_remaining > 0:
-            self._cooldown_remaining -= 1
+            self._cooldown_remaining -= frame_count
             return utterance
 
         pvad_prob = self._run_pvad(audio_frame)
 
         if pvad_prob < self._threshold:
-            self._low_count += 1
+            self._low_count += frame_count
+            logger.warning(
+                f"[pVAD] 目标说话人未在说话, prob={pvad_prob:.3f}, "
+                f"连续低帧数={self._low_count}"
+            )
         else:
             self._low_count = 0
 
@@ -151,8 +157,8 @@ class PVADTurnDetector(TurnDetectorInterface):
             utterance.turn_state = TurnState.SPEAKER_CHANGE
             self._deactivate()
             self._cooldown_remaining = self._cooldown_frames
-            logger.info(
-                f"[pVAD] 检测到说话人切换, prob={pvad_prob:.3f}, "
+            logger.warning(
+                f"[pVAD] SPEAKER_CHANGE 检测到说话人切换, prob={pvad_prob:.3f}, "
                 f"连续低帧数={self._low_count}"
             )
 
