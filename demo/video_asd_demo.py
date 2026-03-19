@@ -37,7 +37,7 @@ SPEAKING_PERSIST_SEC = 0.5   # 说话者绿框持续时间（秒）
 # 与 Silero VAD 一致：utterance 开头为前置静音、结尾为触发结束的静音
 EVAL_PREFIX_TRIM_SEC = 0.05
 EVAL_SUFFIX_TRIM_SEC = 0.05
-EVAL_MIN_CORE_SEC = 0.4
+EVAL_MIN_CORE_SEC = 0.6
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 FONT_SCALE = 0.6
@@ -63,6 +63,8 @@ def parse_args():
     parser.add_argument("--speaker-detector", type=str, default="LR-ASD-ONNX")
     parser.add_argument("--onnx-dir", type=str, default=None)
     parser.add_argument("--vad-model-path", type=str, default=None)
+    parser.add_argument("--voiceprint-model-path", type=str, default=None,
+                        help="声纹模型文件路径 (例如: weights/wespeaker_zh_cnceleb_resnet34.onnx)")
     parser.add_argument("--abs-amplitude-threshold", type=float, default=0.01)
     return parser.parse_args()
 
@@ -172,8 +174,6 @@ def draw_face_overlay(frame: np.ndarray, face_profile, speaking_level: str):
     parts = [f"ID:{face_profile.id}"]
     if speaking_level == 'primary':
         parts.append("SPEAKING")
-    elif speaking_level == 'secondary':
-        parts.append("SPEAKING*")
 
     info_text = " | ".join(parts)
     (text_w, text_h), baseline = cv2.getTextSize(info_text, FONT, FONT_SCALE, FONT_THICKNESS)
@@ -198,11 +198,14 @@ def create_asd(args):
         "prefix_padding_ms": int(EVAL_PREFIX_TRIM_SEC * 1000),
         "abs_amplitude_threshold": args.abs_amplitude_threshold,
         "silence_duration_ms": int(EVAL_SUFFIX_TRIM_SEC * 1000),  # 缩短静音判定，使 VAD 更快切分不同说话人
+        #"min_voice_duration_ms": EVAL_MIN_CORE_SEC,
     }
     speaker_detector_config = {
         "type": args.speaker_detector,
         "onnx_dir": onnx_dir,
     }
+    if args.voiceprint_model_path:
+        speaker_detector_config["voiceprint_model_path"] = args.voiceprint_model_path
 
     print(f"[ASD] 创建 ASD 实例...")
     print(f"  人脸检测器: {face_detector_config}")
@@ -326,19 +329,26 @@ def main():
                     if confirmed_has_speaker:
                         state_tracker.clear_persistent_speakers()
                         print(f"  [{video_time:.2f}s] TURN_END: 清除持久说话人")
+                        
+                    # 无论此前是否确认过说话人，都在句子结束时对整个 core_duration 进行一次 evaluate。
+                    # 这样可以累积足够时长（>0.5s）的音频以提取并更新声纹档案
+                    full_duration = utterance.duration_seconds()
+                    core_duration = full_duration - EVAL_PREFIX_TRIM_SEC - EVAL_SUFFIX_TRIM_SEC
+                    if core_duration >= EVAL_MIN_CORE_SEC:
+                        eval_end = chunk_time - EVAL_SUFFIX_TRIM_SEC
+                        eval_start = eval_end - core_duration
                     else:
-                        full_duration = utterance.duration_seconds()
-                        core_duration = full_duration - EVAL_PREFIX_TRIM_SEC - EVAL_SUFFIX_TRIM_SEC
-                        if core_duration >= EVAL_MIN_CORE_SEC:
-                            eval_end = chunk_time - EVAL_SUFFIX_TRIM_SEC
-                            eval_start = eval_end - core_duration
-                        else:
-                            eval_end = chunk_time
-                            eval_start = eval_end - full_duration
-                        speaker_scores = asd.evaluate(eval_start, eval_end)
-                        if speaker_scores:
+                        eval_end = chunk_time
+                        eval_start = eval_end - full_duration
+                        
+                    speaker_scores = asd.evaluate(eval_start, eval_end)
+                    if speaker_scores:
+                        if not confirmed_has_speaker:
                             state_tracker.update_speakers(speaker_scores)
                             print(f"  [{video_time:.2f}s] TURN_END 补充检测: {speaker_scores}")
+                        else:
+                            print(f"  [{video_time:.2f}s] TURN_END 声纹验证和更新: {speaker_scores}")
+                            
                     confirmed_has_speaker = False
 
                 audio_cursor = chunk_end

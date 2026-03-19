@@ -100,6 +100,10 @@ def parse_args():
         help="ONNX 权重目录 (默认: <project>/weights)"
     )
     parser.add_argument(
+        "--voiceprint-model-path", type=str, default=None,
+        help="声纹模型文件路径 (例如: weights/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx)"
+    )
+    parser.add_argument(
         "--vad-model-path", type=str, default=None,
         help="VAD 模型文件路径 (可选)"
     )
@@ -339,6 +343,13 @@ def draw_face_overlay(frame: np.ndarray, face_profile, is_speaking: bool):
     # 绘制人脸边框
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, BOX_THICKNESS)
 
+    # 绘制五点图 (若有)
+    if face_profile.five_key_points is not None:
+        for pt in face_profile.five_key_points:
+            if len(pt) >= 2:
+                pt_x, pt_y = int(pt[0]), int(pt[1])
+                cv2.circle(frame, (pt_x, pt_y), radius=2, color=(0, 255, 255), thickness=-1)
+
     # 构建信息文本
     info_parts = [f"ID:{face_profile.id}"]
     if face_profile.gender:
@@ -408,6 +419,8 @@ def create_asd(args):
         "type": args.speaker_detector,
         "onnx_dir": onnx_dir,
     }
+    if args.voiceprint_model_path:
+        speaker_detector_config["voiceprint_model_path"] = args.voiceprint_model_path
 
     print(f"[ASD] 创建 ASD 实例...")
     print(f"  人脸检测器: {face_detector_config}")
