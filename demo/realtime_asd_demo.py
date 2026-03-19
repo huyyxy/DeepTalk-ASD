@@ -17,6 +17,7 @@ realtime_asd_demo.py
 
     # 自定义 ASD 组件:
     python3 demo/realtime_asd_demo.py --face-detector inspireface --speaker-detector LR-ASD-ONNX
+    python3 demo/realtime_asd_demo.py --turn-detector pvad
 """
 
 import os
