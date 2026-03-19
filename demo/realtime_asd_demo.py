@@ -96,12 +96,16 @@ def parse_args():
         help="说话者检测器类型 (默认: LR-ASD-ONNX)"
     )
     parser.add_argument(
-        "--onnx-dir", type=str, default=None,
-        help="ONNX 权重目录 (默认: <project>/weights)"
+        "--model-dir", type=str, default=None,
+        help="模型文件目录 (默认: <project>/weights)"
     )
     parser.add_argument(
-        "--vad-model-path", type=str, default=None,
-        help="VAD 模型文件路径 (可选)"
+        "--voiceprint-model-name", type=str, default=None,
+        help="声纹模型文件名 (例如: wespeaker_zh_cnceleb_resnet34.onnx)"
+    )
+    parser.add_argument(
+        "--vad-model-name", type=str, default=None,
+        help="VAD 模型文件名 (默认: silero_vad.onnx)"
     )
     parser.add_argument(
         "--abs-amplitude-threshold", type=float, default=0.01,
@@ -284,7 +288,7 @@ class AudioCaptureThread(threading.Thread):
                     if self._confirmed_has_speaker:
                         # TURN_CONFIRMED 时已检测到说话人，结束持久绿框
                         self._state_tracker.clear_persistent_speakers()
-                        print(f"[ASD] TURN_END: 清除持久说话人")
+                        print(f"[ASD] TURN_END: 将代表说话人绿框改为红色")
                     else:
                         # TURN_CONFIRMED 时未检测到说话人，再检测一次
                         full_duration = utterance.duration_seconds()
@@ -339,6 +343,13 @@ def draw_face_overlay(frame: np.ndarray, face_profile, is_speaking: bool):
     # 绘制人脸边框
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, BOX_THICKNESS)
 
+    # 绘制五点图 (若有)
+    if face_profile.five_key_points is not None:
+        for pt in face_profile.five_key_points:
+            if len(pt) >= 2:
+                pt_x, pt_y = int(pt[0]), int(pt[1])
+                cv2.circle(frame, (pt_x, pt_y), radius=2, color=(0, 255, 255), thickness=-1)
+
     # 构建信息文本
     info_parts = [f"ID:{face_profile.id}"]
     if face_profile.gender:
@@ -383,31 +394,28 @@ def create_asd(args):
     返回:
         ASDInterface 实例
     """
-    # 确定 ONNX 目录
-    onnx_dir = args.onnx_dir
-    if onnx_dir is None:
-        onnx_dir = os.path.join(PROJECT_ROOT, "weights")
+    model_dir = args.model_dir
+    if model_dir is None:
+        model_dir = os.path.join(PROJECT_ROOT, "weights")
 
-    # 人脸检测器配置
     face_detector_config = {
         "type": args.face_detector,
     }
 
-    # 轮次检测器配置
-    vad_model_path = args.vad_model_path
-    if vad_model_path is None:
-        vad_model_path = os.path.join(PROJECT_ROOT, "weights", "silero_vad.onnx")
     turn_detector_config = {
         "type": args.turn_detector,
-        "model_path": vad_model_path,
+        "model_dir": model_dir,
         "abs_amplitude_threshold": args.abs_amplitude_threshold,
     }
+    if args.vad_model_name:
+        turn_detector_config["model_name"] = args.vad_model_name
 
-    # 说话者检测器配置
     speaker_detector_config = {
         "type": args.speaker_detector,
-        "onnx_dir": onnx_dir,
+        "model_dir": model_dir,
     }
+    if args.voiceprint_model_name:
+        speaker_detector_config["voiceprint_model_name"] = args.voiceprint_model_name
 
     print(f"[ASD] 创建 ASD 实例...")
     print(f"  人脸检测器: {face_detector_config}")

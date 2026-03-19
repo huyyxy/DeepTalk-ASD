@@ -24,7 +24,26 @@ from .face_info import FaceProfile, FaceRectangle, HeadPose
 
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-INSPIREFACE_RESOURCE_PATH = os.environ.get('INSPIREFACE_RESOURCE_PATH', os.path.join(_PROJECT_ROOT, 'weights', 'Pikachu'))
+
+
+def _resolve_inspireface_resource_path() -> str:
+    """解析 InspireFace 资源路径，优先级：环境变量 > 本地 weights > 自动下载"""
+    # 1. 环境变量显式指定
+    env_path = os.environ.get('INSPIREFACE_RESOURCE_PATH')
+    if env_path and os.path.exists(env_path):
+        return env_path
+
+    # 2. 本地 weights 目录
+    local_path = os.path.join(_PROJECT_ROOT, 'weights', 'Pikachu')
+    if os.path.exists(local_path):
+        return local_path
+
+    # 3. 通过 model_manager 自动下载
+    from ..model_manager import ensure_model
+    return str(ensure_model("Pikachu"))
+
+
+INSPIREFACE_RESOURCE_PATH = None  # 延迟解析，在 __init__ 中调用
 
 WINDOWS_FACE_PROFILES_FRAMES = int(os.environ.get('WINDOWS_FACE_PROFILES_FRAMES', '2'))
 MIN_FRAMES_FOR_FACE_PRESENTATION = int(os.environ.get('MIN_FRAMES_FOR_FACE_PRESENTATION', '1'))
@@ -47,19 +66,22 @@ emotion_tags = ["neutral", "happy", "sad", "surprise", "fear", "disgust", "angry
 class InspireFaceDetector(FaceDetectorInterface):
     """基于 InspireFace SDK 的人脸检测器"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, model_dir: str = None, **kwargs):
         """
         初始化 InspireFace 人脸检测器。
 
         参数:
-            kwargs: 可选参数，当前未使用，保留用于未来扩展。
+            model_dir: 模型资源目录路径，不传则自动解析（环境变量 > 本地 weights > 自动下载）。
+            kwargs: 其他可选参数，保留用于未来扩展。
         """
         super().__init__(**kwargs)
+
+        resource_path = model_dir or _resolve_inspireface_resource_path()
 
         # 检查是否已经初始化，避免重复初始化导致资源泄漏
         # 如果已经初始化，launch()会抛出异常，我们捕获它
         try:
-            isf.launch(resource_path=INSPIREFACE_RESOURCE_PATH)
+            isf.launch(resource_path=resource_path)
         except Exception:
             # 已经初始化过，忽略异常
             pass
@@ -120,9 +142,17 @@ class InspireFaceDetector(FaceDetectorInterface):
             x1, y1, x2, y2 = face.location
             width = x2 - x1
             height = y2 - y1
-
             face_image_bgr = self._face_area(image, x1, y1, width, height)
             expand_face_image_bgr = self._expand_face_area_by_ratio(image, x1, y1, width, height, expand_ratio=1)
+
+            five_key_points = None
+            try:
+                # 获取 5 个关键点 (双目、鼻头、两嘴角)
+                pts5 = self.session.get_face_five_key_points(face)
+                if pts5 is not None and isinstance(pts5, np.ndarray) and pts5.shape == (5, 2):
+                    five_key_points = [(float(pt[0]), float(pt[1])) for pt in pts5]
+            except Exception:
+                pass
 
             if exts is None:
                 continue
@@ -177,6 +207,7 @@ class InspireFaceDetector(FaceDetectorInterface):
                 age=age_bracket_tags[ext.age_bracket],
                 emotion=emotion,
                 face_image=face_image_bgr,
+                five_key_points=five_key_points,
                 expand_face_image=expand_face_image_bgr,
                 face_image_score=ext.quality_confidence,
                 best_face_image=best_face_image,
