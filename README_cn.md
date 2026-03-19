@@ -137,6 +137,53 @@ config = {
 asd = ASDDetectorFactory(**config).create()
 ```
 
+### pVAD 配置（说话人切换检测）
+
+pVAD (Personal VAD) 在标准 VAD 基础上叠加**说话人切换检测**——当检测到当前语音段的说话人发生变化时，主动触发 `SPEAKER_CHANGE` 事件，使 ASD 系统能更快速地响应多人交替说话场景。
+
+将 `turn_detector.type` 设为 `"pvad"` 即可启用：
+
+```python
+config = {
+    "face_detector": {
+        "type": "inspireface",
+        "model_dir": "weights"
+    },
+    "turn_detector": {
+        "type": "pvad",
+        "pvad_model_dir": "weights",               # pVAD 模型资源目录
+        "pvad_model_name": "pvad.onnx",             # pVAD ONNX 模型文件名（默认值）
+        "spk_model_name": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",  # 192 维声纹模型
+        "pvad_threshold": 0.35,                     # 低于此阈值视为非目标说话人（默认 0.35）
+        "min_low_frames": 30,                       # 连续低于阈值的帧数达到此值触发切换（默认 30）
+        "cooldown_frames": 50,                      # 触发后冷却帧数，防止误触（默认 50）
+        "vad": {                                    # 内部 VAD 配置（可选，默认 silero-vad）
+            "type": "silero-vad",
+            "model_dir": "weights"
+        }
+    },
+    "speaker_detector": {
+        "type": "LR-ASD-ONNX",
+        "model_dir": "weights",
+        "voiceprint_model_name": "wespeaker_zh_cnceleb_resnet34.onnx"
+    }
+}
+
+asd = ASDDetectorFactory(**config).create()
+```
+
+**pVAD 参数说明：**
+
+| 参数 | 类型 | 默认值 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `pvad_model_dir` | str | *必填* | pVAD 模型资源目录，需包含 pVAD 模型和 192 维声纹模型 |
+| `pvad_model_name` | str | `pvad.onnx` | pVAD ONNX 模型文件名 |
+| `spk_model_name` | str | `speaker_model.onnx` | 192 维声纹提取模型文件名 |
+| `pvad_threshold` | float | `0.35` | pVAD 概率低于此阈值视为"非目标说话人" |
+| `min_low_frames` | int | `30` | 连续低于阈值的帧数达到此值才触发 SPEAKER_CHANGE |
+| `cooldown_frames` | int | `50` | 触发 SPEAKER_CHANGE 后的冷却帧数，防止误触 |
+| `vad` | dict | `{"type": "silero-vad"}` | 内部底层 VAD 配置，pVAD 以装饰器模式包装此 VAD |
+
 ## 许可证说明
 
 本项目代码遵循 **MIT 许可证**。但其集成的预训练模型受各自许可证约束：
