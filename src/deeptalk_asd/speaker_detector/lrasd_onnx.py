@@ -532,6 +532,34 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
             updated /= np.linalg.norm(updated)
             self.voice_profiles[track_id] = updated
 
+    def get_audio_samples(self, start_time: float = None, end_time: float = None):
+        """获取指定时间范围内的原始音频样本 (int16 np.ndarray)。"""
+        if not self.audio_buffer:
+            return None
+
+        buf_len = len(self.audio_buffer)
+        buffer_duration = buf_len / self.audio_sample_rate
+        buffer_end_time = self.last_audio_timestamp
+        buffer_start_time = buffer_end_time - buffer_duration
+
+        if start_time is not None and end_time is not None:
+            if end_time - start_time > buffer_duration:
+                start_time, end_time = None, None
+
+        if start_time is not None and end_time is not None:
+            eff_start = max(start_time, buffer_start_time)
+            eff_end = min(end_time, buffer_end_time)
+            start_idx = max(0, int((eff_start - buffer_start_time) * self.audio_sample_rate))
+            end_idx = min(buf_len, int((eff_end - buffer_start_time) * self.audio_sample_rate))
+        else:
+            start_idx = 0
+            end_idx = buf_len
+
+        if start_idx >= end_idx:
+            return None
+
+        return np.array(list(self.audio_buffer)[start_idx:end_idx], dtype=np.int16)
+
     def evaluate(self, start_time: float = None, end_time: float = None):
         """
         评估当前活动说话者（多时长滑窗推理）。

@@ -326,6 +326,20 @@ def main():
                     else:
                         confirmed_has_speaker = False
 
+                # ── SPEAKER_CHANGE：pVAD 检测到说话人切换 ──
+                elif utterance is not None and utterance.turn_state == TurnState.SPEAKER_CHANGE:
+                    eval_end = chunk_time
+                    eval_start = eval_end - 1.0
+                    speaker_scores = asd.evaluate(eval_start, eval_end)
+                    if speaker_scores:
+                        has_speaker = any(score > 0 for score in speaker_scores.values())
+                        if has_speaker:
+                            state_tracker.set_persistent_speakers(speaker_scores)
+                            confirmed_has_speaker = True
+                        else:
+                            confirmed_has_speaker = False
+                        print(f"  [{video_time:.2f}s] SPEAKER_CHANGE 说话人切换: {speaker_scores}")
+
                 # ── TURN_END：清除持久绿框或补充检测 ──
                 elif utterance is not None and utterance.turn_state == TurnState.TURN_END:
                     if confirmed_has_speaker:

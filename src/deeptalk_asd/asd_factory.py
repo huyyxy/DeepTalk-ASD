@@ -54,6 +54,12 @@ class ASDDetectorFactory:
         if config.get("type") == "silero-vad" and "model_dir" not in config:
             model_path = ensure_model("silero_vad.onnx")
             config["model_dir"] = str(model_path.parent)
+        elif config.get("type") == "pvad":
+            vad_config = config.get("vad", {"type": "silero-vad"})
+            if vad_config.get("type") == "silero-vad" and "model_dir" not in vad_config:
+                model_path = ensure_model("silero_vad.onnx")
+                vad_config["model_dir"] = str(model_path.parent)
+            config["vad"] = vad_config
         return config
 
     def _resolve_speaker_detector_config(self, speaker_config: dict) -> dict:
@@ -102,9 +108,10 @@ class ASDDetectorFactory:
                 return None
 
             from .turn_detector.factory import TurnDetectorFactory
+            logger.info(f"开始创建 TurnDetector: type={turn_type}, config={turn_config}")
             turn_detector = TurnDetectorFactory(turn_type, **turn_config).turn_detector()
             if turn_detector is None:
-                logger.error(f"创建 TurnDetector(type={turn_type}) 失败")
+                logger.error(f"创建 TurnDetector(type={turn_type}) 失败，工厂返回 None（详细原因见上方日志）")
                 return None
             logger.info(f"TurnDetector 创建成功: type={turn_type}")
 

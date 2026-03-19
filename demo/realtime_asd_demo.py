@@ -284,6 +284,22 @@ class AudioCaptureThread(threading.Thread):
                         print(f"[ASD] TURN_CONFIRMED 说话者评估: {speaker_scores}, 耗时: {end_val - start_val:.3f}s")
                     else:
                         self._confirmed_has_speaker = False
+                elif utterance is not None and utterance.turn_state == TurnState.SPEAKER_CHANGE:
+                    # pVAD 检测到说话人切换，重新评估
+                    eval_end = create_time
+                    eval_start = eval_end - 1.0
+                    start_val = time.perf_counter()
+                    speaker_scores = self._asd.evaluate(eval_start, eval_end)
+                    end_val = time.perf_counter()
+                    if speaker_scores:
+                        has_speaker = any(score > 0 for score in speaker_scores.values())
+                        if has_speaker:
+                            self._state_tracker.set_persistent_speakers(speaker_scores)
+                            self._confirmed_has_speaker = True
+                        else:
+                            self._confirmed_has_speaker = False
+                        print(f"[ASD] SPEAKER_CHANGE 说话人切换: {speaker_scores}, 耗时: {end_val - start_val:.3f}s")
+
                 elif utterance is not None and utterance.turn_state == TurnState.TURN_END:
                     if self._confirmed_has_speaker:
                         # TURN_CONFIRMED 时已检测到说话人，结束持久绿框
@@ -402,13 +418,29 @@ def create_asd(args):
         "type": args.face_detector,
     }
 
-    turn_detector_config = {
-        "type": args.turn_detector,
-        "model_dir": model_dir,
-        "abs_amplitude_threshold": args.abs_amplitude_threshold,
-    }
-    if args.vad_model_name:
-        turn_detector_config["model_name"] = args.vad_model_name
+    if args.turn_detector == "pvad":
+        # pVAD 装饰器模式：内层 VAD 配置嵌套在 "vad" key 下
+        vad_inner_config = {
+            "type": "silero-vad",
+            "model_dir": model_dir,
+            "abs_amplitude_threshold": args.abs_amplitude_threshold,
+        }
+        if args.vad_model_name:
+            vad_inner_config["model_name"] = args.vad_model_name
+        turn_detector_config = {
+            "type": "pvad",
+            "pvad_model_dir": model_dir,
+            "spk_model_name": "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
+            "vad": vad_inner_config,
+        }
+    else:
+        turn_detector_config = {
+            "type": args.turn_detector,
+            "model_dir": model_dir,
+            "abs_amplitude_threshold": args.abs_amplitude_threshold,
+        }
+        if args.vad_model_name:
+            turn_detector_config["model_name"] = args.vad_model_name
 
     speaker_detector_config = {
         "type": args.speaker_detector,

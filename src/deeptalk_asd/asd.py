@@ -102,7 +102,7 @@ class ASD(ASDInterface):
 
         # 2. TurnDetector 进行 VAD 轮次检测
         utterance = self._turn_detector.detect(audio_frame)
-        if utterance.turn_state in [TurnState.TURN_START, TurnState.TURN_CONFIRMED, TurnState.TURN_END, TurnState.TURN_REJECTED]:
+        if utterance.turn_state in [TurnState.TURN_START, TurnState.TURN_CONFIRMED, TurnState.TURN_END, TurnState.TURN_REJECTED, TurnState.SPEAKER_CHANGE]:
             logger.critical(f"Utterance: {utterance.turn_state.name}")
         return utterance
 
@@ -118,7 +118,19 @@ class ASD(ASDInterface):
             最新时间点的活动说话者的 track_id 和置信度得分
             格式: {track_id: score, ...}
         """
-        return self._speaker_detector.evaluate(start_time, end_time)
+        scores = self._speaker_detector.evaluate(start_time, end_time)
+
+        if scores:
+            best_track = max(scores, key=scores.get)
+            if scores[best_track] > 0:
+                audio_samples = self._speaker_detector.get_audio_samples(start_time, end_time)
+                if audio_samples is not None and len(audio_samples) > 0:
+                    self._turn_detector.on_speaker_identified(
+                        audio_samples.astype('float32') / 32768.0,
+                        getattr(self._speaker_detector, 'audio_sample_rate', 16000),
+                    )
+
+        return scores
 
     def reset(self):
         """重置系统状态"""

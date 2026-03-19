@@ -59,6 +59,20 @@ class SpeakerDetectorInterface:
         """
         pass
 
+    def get_audio_samples(self, start_time: float = None, end_time: float = None) -> Optional[np.ndarray]:
+        """
+        获取指定时间范围内的原始音频样本。
+
+        参数:
+            start_time: 起始时间 (time.perf_counter 时间戳)，可选
+            end_time: 结束时间 (time.perf_counter 时间戳)，可选
+            若均为 None，返回整个音频缓冲区。
+
+        返回:
+            int16 格式的音频数据 (np.ndarray)，或 None
+        """
+        pass
+
     def reset(self):
         """重置系统状态"""
         pass

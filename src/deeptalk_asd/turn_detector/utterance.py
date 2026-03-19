@@ -17,6 +17,7 @@ class TurnState(IntEnum):
     TURN_SILENCE = auto()    # Turn 中检测到静音
     TURN_END = auto()        # 正常结束（已确认的语音段结束）
     TURN_REJECTED = auto()   # 拒绝结束（未通过验证，伪语音段）
+    SPEAKER_CHANGE = auto()  # pVAD 检测到说话人切换
 
 @dataclass
 class Utterance:
