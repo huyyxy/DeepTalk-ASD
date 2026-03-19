@@ -10,6 +10,7 @@ video_asd_demo.py
     python3 demo/video_asd_demo.py --input demo/demo.mp4
     python3 demo/video_asd_demo.py --input demo/demo.mp4 --output demo/demo_result.mp4
     python3 demo/video_asd_demo.py --input demo/demo.mp4 --display
+    python3 demo/video_asd_demo.py --input demo/demo.mp4 --turn-detector pvad
 """
 
 import os
@@ -17,7 +18,6 @@ import sys
 import time
 import argparse
 import subprocess
-import tempfile
 
 import cv2
 import numpy as np
@@ -35,8 +35,8 @@ AUDIO_CHUNK_MS = 30
 AUDIO_CHUNK_SAMPLES = int(AUDIO_SAMPLE_RATE * AUDIO_CHUNK_MS / 1000)
 SPEAKING_PERSIST_SEC = 0.5   # 说话者绿框持续时间（秒）
 # 与 Silero VAD 一致：utterance 开头为前置静音、结尾为触发结束的静音
-EVAL_PREFIX_TRIM_SEC = 0.05
-EVAL_SUFFIX_TRIM_SEC = 0.05
+EVAL_PREFIX_TRIM_SEC = 0.1
+EVAL_SUFFIX_TRIM_SEC = 0.1
 EVAL_MIN_CORE_SEC = 0.6
 
 FONT = cv2.FONT_HERSHEY_SIMPLEX
@@ -48,6 +48,9 @@ COLOR_SPEAKING_SECONDARY = (255, 165, 0)  # 蓝色 - 次说话人 (BGR)
 COLOR_NOT_SPEAKING = (0, 0, 255)     # 红色
 COLOR_TEXT_BG = (0, 0, 0)
 COLOR_TEXT_FG = (255, 255, 255)
+COLOR_TURN_STATE = (0, 255, 0)       # 绿色 - TurnState 显示
+
+TURN_STATE_DISPLAY_MS = 300  # TurnState 显示持续时间（毫秒）
 
 
 def parse_args():
@@ -71,10 +74,30 @@ def parse_args():
     return parser.parse_args()
 
 
-def extract_audio_from_video(video_path: str, sample_rate: int = 16000) -> np.ndarray:
-    """使用 ffmpeg 从视频中提取音频为 PCM int16 单声道数据"""
+def get_video_start_time(video_path: str) -> float:
+    """使用 ffprobe 获取视频流的 start_time（秒），用于修正音画对齐"""
     cmd = [
-        "ffmpeg", "-i", video_path,
+        "ffprobe", "-v", "quiet",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=start_time",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    start_str = result.stdout.strip()
+    if start_str and start_str != "N/A":
+        return float(start_str)
+    return 0.0
+
+
+def extract_audio_from_video(video_path: str, sample_rate: int = 16000,
+                             start_time: float = 0) -> np.ndarray:
+    """使用 ffmpeg 从视频中提取音频为 PCM int16 单声道数据，可指定起始时间"""
+    cmd = ["ffmpeg"]
+    if start_time > 0:
+        cmd += ["-ss", f"{start_time:.6f}"]
+    cmd += [
+        "-i", video_path,
         "-vn",
         "-acodec", "pcm_s16le",
         "-ar", str(sample_rate),
@@ -188,6 +211,55 @@ def draw_face_overlay(frame: np.ndarray, face_profile, speaking_level: str):
                 FONT, FONT_SCALE, COLOR_TEXT_FG, FONT_THICKNESS, cv2.LINE_AA)
 
 
+class TurnStateDisplay:
+    """TurnState 显示管理器，在画面右上角显示状态并保留指定时间"""
+
+    def __init__(self, display_ms: float = TURN_STATE_DISPLAY_MS):
+        self._current_state: TurnState = None
+        self._expire_time: float = 0
+        self._display_ms = display_ms / 1000.0  # 转换为秒
+
+    def set_state(self, state: TurnState):
+        """设置当前显示的 TurnState，并设置过期时间"""
+        self._current_state = state
+        self._expire_time = time.perf_counter() + self._display_ms
+
+    def get_current_state(self) -> TurnState:
+        """获取当前应该显示的 TurnState，如果已过期则返回 None"""
+        if self._current_state is None:
+            return None
+        if time.perf_counter() > self._expire_time:
+            self._current_state = None
+            return None
+        return self._current_state
+
+
+def draw_turn_state_overlay(frame: np.ndarray, turn_state: TurnState):
+    """
+    在视频帧右上角绘制 TurnState 状态。
+    """
+    if turn_state is None:
+        return
+
+    state_text = turn_state.name
+    (text_w, text_h), baseline = cv2.getTextSize(state_text, FONT, FONT_SCALE * 1.2, FONT_THICKNESS + 1)
+
+    # 右上角位置（留 20px 边距）
+    frame_h, frame_w = frame.shape[:2]
+    text_x = frame_w - text_w - 20
+    text_y = text_h + 20
+
+    # 绘制背景
+    cv2.rectangle(frame,
+                  (text_x - 10, text_y - text_h - baseline - 5),
+                  (text_x + text_w + 10, text_y + baseline + 5),
+                  COLOR_TEXT_BG, -1)
+
+    # 绘制文字（绿色）
+    cv2.putText(frame, state_text, (text_x, text_y),
+                FONT, FONT_SCALE * 1.2, COLOR_TURN_STATE, FONT_THICKNESS + 1, cv2.LINE_AA)
+
+
 def create_asd(args):
     """根据命令行参数创建 ASD 实例"""
     model_dir = args.model_dir or os.path.join(PROJECT_ROOT, "weights")
@@ -251,9 +323,14 @@ def main():
     # 1. 创建 ASD 实例
     asd = create_asd(args)
 
-    # 2. 提取音频
+    # 2. 获取视频流 start_time 并提取音频（从视频起始时刻开始，保证音画对齐）
+    video_start_time = get_video_start_time(args.input)
+    if video_start_time > 0:
+        print(f"[信息] 视频流 start_time={video_start_time:.3f}s，音频将从此时刻开始提取")
+
     print(f"[信息] 正在从视频中提取音频...")
-    audio_data = extract_audio_from_video(args.input, AUDIO_SAMPLE_RATE)
+    audio_data = extract_audio_from_video(args.input, AUDIO_SAMPLE_RATE,
+                                          start_time=video_start_time)
 
     # 3. 打开视频
     cap = cv2.VideoCapture(args.input)
@@ -271,18 +348,37 @@ def main():
     print(f"  分辨率: {frame_w}x{frame_h}, FPS: {fps:.2f}, "
           f"总帧数: {total_frames}, 时长: {duration:.2f}s")
 
-    # 4. 初始化视频写入器（先写入临时文件，稍后合并音频）
-    tmp_fd, tmp_video_path = tempfile.mkstemp(suffix=".mp4")
-    os.close(tmp_fd)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(tmp_video_path, fourcc, fps, (frame_w, frame_h))
-    if not writer.isOpened():
-        print(f"[错误] 无法创建临时输出视频: {tmp_video_path}")
-        cap.release()
-        sys.exit(1)
+    # 4. 启动 ffmpeg 子进程：通过管道接收原始帧，同时从原视频取音频，一步完成编码输出
+    #    用 -ss 跳过原视频中视频流起始之前的音频，保证音画对齐
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-f", "rawvideo",
+        "-pix_fmt", "bgr24",
+        "-s", f"{frame_w}x{frame_h}",
+        "-r", str(fps),
+        "-i", "pipe:0",
+    ]
+    if video_start_time > 0:
+        ffmpeg_cmd += ["-ss", f"{video_start_time:.6f}"]
+    ffmpeg_cmd += [
+        "-i", args.input,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-shortest",
+        args.output,
+    ]
+    ffmpeg_proc = subprocess.Popen(
+        ffmpeg_cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
 
     # 5. 初始化状态追踪
     state_tracker = SpeakingStateTracker()
+    turn_state_display = TurnStateDisplay()
     audio_cursor = 0
     confirmed_has_speaker = False  # 本轮 utterance 是否已在 TURN_CONFIRMED 检测到说话人
 
@@ -319,8 +415,13 @@ def main():
                 )
                 utterance = asd.append_audio(audio_frame, chunk_time)
 
+                # ── TURN_START / TURN_REJECTED：显示状态 ──
+                if utterance is not None and utterance.turn_state in (TurnState.TURN_START, TurnState.TURN_REJECTED):
+                    turn_state_display.set_state(utterance.turn_state)
+
                 # ── TURN_CONFIRMED：检测说话人，有则持久绿框 ──
                 if utterance is not None and utterance.turn_state == TurnState.TURN_CONFIRMED:
+                    turn_state_display.set_state(utterance.turn_state)
                     full_duration = utterance.duration_seconds()
                     eval_end = chunk_time
                     eval_start = eval_end - full_duration
@@ -338,6 +439,7 @@ def main():
 
                 # ── SPEAKER_CHANGE：pVAD 检测到说话人切换 ──
                 elif utterance is not None and utterance.turn_state == TurnState.SPEAKER_CHANGE:
+                    turn_state_display.set_state(utterance.turn_state)
                     eval_end = chunk_time
                     eval_start = eval_end - 1.0
                     speaker_scores = asd.evaluate(eval_start, eval_end)
@@ -352,6 +454,7 @@ def main():
 
                 # ── TURN_END：清除持久绿框或补充检测 ──
                 elif utterance is not None and utterance.turn_state == TurnState.TURN_END:
+                    turn_state_display.set_state(utterance.turn_state)
                     if confirmed_has_speaker:
                         state_tracker.clear_persistent_speakers()
                         print(f"  [{video_time:.2f}s] TURN_END: 清除持久说话人")
@@ -395,7 +498,12 @@ def main():
                     speaking_level = state_tracker.get_speaking_level(profile.id)
                     draw_face_overlay(frame, profile, speaking_level)
 
-            writer.write(frame)
+            # ── 绘制 TurnState 到右上角 ──
+            current_turn_state = turn_state_display.get_current_state()
+            if current_turn_state is not None:
+                draw_turn_state_overlay(frame, current_turn_state)
+
+            ffmpeg_proc.stdin.write(frame.tobytes())
 
             # 进度显示
             frame_idx += 1
@@ -418,35 +526,19 @@ def main():
         print("\n[信息] 检测到 Ctrl+C，正在退出...")
     finally:
         cap.release()
-        writer.release()
+        if ffmpeg_proc.stdin and not ffmpeg_proc.stdin.closed:
+            ffmpeg_proc.stdin.close()
         if args.display:
             cv2.destroyAllWindows()
 
-        # 使用 ffmpeg 将原视频的音频轨道合并到渲染后的视频中
-        print(f"\n[信息] 正在合并音频到输出视频...")
-        mux_cmd = [
-            "ffmpeg", "-y",
-            "-i", tmp_video_path,   # 渲染后的视频（无音频）
-            "-i", args.input,       # 原始视频（取音频）
-            "-c:v", "copy",         # 视频流直接拷贝
-            "-c:a", "aac",          # 音频编码为 AAC
-            "-map", "0:v:0",        # 取第一个输入的视频流
-            "-map", "1:a:0",        # 取第二个输入的音频流
-            "-shortest",
-            args.output,
-        ]
-        mux_proc = subprocess.run(mux_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        # 清理临时文件
-        try:
-            os.remove(tmp_video_path)
-        except OSError:
-            pass
+        print(f"\n[信息] 正在等待 ffmpeg 编码完成...")
+        ffmpeg_proc.wait()
 
-        if mux_proc.returncode != 0:
-            stderr_text = mux_proc.stderr.decode("utf-8", errors="replace")
-            print(f"[警告] 音频合并失败，输出视频可能没有声音:\n{stderr_text}")
+        if ffmpeg_proc.returncode != 0:
+            stderr_text = ffmpeg_proc.stderr.read().decode("utf-8", errors="replace")
+            print(f"[警告] ffmpeg 编码失败:\n{stderr_text}")
         else:
-            print(f"[信息] 音频合并完成")
+            print(f"[信息] 视频编码完成")
 
         total_elapsed = time.perf_counter() - process_start
         print(f"\n[完成] 输出视频: {args.output}")

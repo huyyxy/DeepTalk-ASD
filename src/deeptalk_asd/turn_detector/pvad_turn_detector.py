@@ -46,8 +46,8 @@ class PVADTurnDetector(TurnDetectorInterface):
         model_dir: str,
         pvad_model_name: str = "pvad.onnx",
         spk_model_name: str = "3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
-        pvad_threshold: float = 0.35,
-        min_low_frames: int = 10,
+        pvad_threshold: float = 0.3,
+        min_low_frames: int = 20,
         cooldown_frames: int = 50,
     ):
         """
@@ -143,6 +143,11 @@ class PVADTurnDetector(TurnDetectorInterface):
             return utterance
 
         pvad_prob = self._run_pvad(audio_frame)
+
+        logger.info(
+                f"[pVAD] 目标说话人说话检测, prob={pvad_prob:.3f}, "
+                f"连续低帧数={self._low_count}"
+            )
 
         if pvad_prob < self._threshold:
             self._low_count += frame_count
