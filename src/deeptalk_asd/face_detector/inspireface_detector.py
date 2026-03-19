@@ -66,17 +66,17 @@ emotion_tags = ["neutral", "happy", "sad", "surprise", "fear", "disgust", "angry
 class InspireFaceDetector(FaceDetectorInterface):
     """基于 InspireFace SDK 的人脸检测器"""
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, model_dir: str = None, **kwargs):
         """
         初始化 InspireFace 人脸检测器。
 
         参数:
-            kwargs: 可选参数，当前未使用，保留用于未来扩展。
+            model_dir: 模型资源目录路径，不传则自动解析（环境变量 > 本地 weights > 自动下载）。
+            kwargs: 其他可选参数，保留用于未来扩展。
         """
         super().__init__(**kwargs)
 
-        # 延迟解析资源路径（支持自动下载）
-        resource_path = _resolve_inspireface_resource_path()
+        resource_path = model_dir or _resolve_inspireface_resource_path()
 
         # 检查是否已经初始化，避免重复初始化导致资源泄漏
         # 如果已经初始化，launch()会抛出异常，我们捕获它

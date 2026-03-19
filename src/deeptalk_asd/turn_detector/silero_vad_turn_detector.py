@@ -29,7 +29,8 @@ class SileroVadTurnDetector(TurnDetectorInterface):
 
     def __init__(
         self,
-        model_path: str,
+        model_dir: str,
+        model_name: str = "silero_vad.onnx",
         *,
         vad_threshold: float = 0.5,
         prefix_padding_ms: int = 300,
@@ -40,7 +41,8 @@ class SileroVadTurnDetector(TurnDetectorInterface):
         """初始化 SileroVadTurnDetector
 
         Args:
-            model_path: Silero VAD ONNX 模型路径
+            model_dir: 模型文件所在目录
+            model_name: VAD 模型文件名，默认 "silero_vad.onnx"
             vad_threshold: VAD 语音概率阈值 (0.0~1.0)，超过此值视为人声帧
             prefix_padding_ms: 语音段前置非人声时间（毫秒），
                 确定语音开始后，会回溯包含这段前置静音帧
@@ -51,7 +53,7 @@ class SileroVadTurnDetector(TurnDetectorInterface):
             abs_amplitude_threshold: loudness_percentile_95 的阈值，
                 超过此值的语音段才被接受（TURN_END），否则被拒绝（TURN_REJECTED）
         """
-        self._vad = SileroVAD(model_path)
+        self._vad = SileroVAD(model_dir, model_name)
         self._vad_threshold = vad_threshold
         self._prefix_padding_ms = prefix_padding_ms
         self._min_voice_duration_ms = min_voice_duration_ms

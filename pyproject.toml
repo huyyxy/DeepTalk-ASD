@@ -4,8 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deeptalk-asd"
-version = "0.2.0"
+version = "0.3.0"
 description = "DeepTalk Active Speaker Detection"
+readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "python-dotenv",
@@ -19,3 +20,15 @@ dependencies = [
     "tqdm",
     "sherpa-onnx",
 ]
+
+[project.urls]
+Homepage = "https://github.com/huyyxy/DeepTalk-ASD"
+"Bug Tracker" = "https://github.com/huyyxy/DeepTalk-ASD/issues"
+"Source Code" = "https://github.com/huyyxy/DeepTalk-ASD"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+deeptalk-asd = "deeptalk_asd.__main__:main"
+

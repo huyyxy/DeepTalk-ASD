@@ -18,6 +18,7 @@ DeepTalk-ASD 是一个高效的活跃说话者检测 (Active Speaker Detection, 
     - **TurnDetector**: 音频 VAD 与轮次管理（集成 Silero VAD）。
     - **SpeakerDetector**: 核心决策层，执行音视频特征提取、融合决策及声纹比对（基于 LR-ASD ONNX）。
 - **高性能**: 全链路 ONNX 推理，针对 CPU 优化，支持在移动端或普通笔记本上实时运行。
+- **模型自动管理**: 首次使用时自动下载模型；支持离线模式和自定义缓存目录。
 - **多场景 Demo**: 提供实时摄像头、视频文件、声纹提取及 pVAD 等多个演示方案。
 
 ## 系统架构
@@ -33,32 +34,21 @@ DeepTalk-ASD 是一个高效的活跃说话者检测 (Active Speaker Detection, 
 
 ## 快速开始
 
-### 1. 环境准备
-
-建议使用 Python 3.8 或更高版本。
+### 1. 安装
 
 ```bash
-# 克隆仓库
-git clone <repository_url>
-cd DeepTalk-ASD
-
-# 安装核心依赖
-python3 -m pip install -r requirements.txt
-
-# 以可编辑模式安装项目
-pip3 install -e .
+pip install deeptalk_asd
 ```
 
-### 2. 模型权重
+### 2. 零配置使用
 
-请确保 `weights` 目录下包含以下 ONNX 模型文件：
+首次使用时**自动下载**所需模型（约 46 MB），无需手动配置：
 
-| 模型分类 | 文件名 | 说明 |
-| :--- | :--- | :--- |
-| **LR-ASD** | `audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx` | 音视频 ASD 核心模型 |
-| **VAD** | `silero_vad.onnx` | 语音轮次检测模型 |
-| **Face** | `Pikachu` | InspireFace 人脸检测所需资源 |
-| **Voiceprint** | `wespeaker_zh_cnceleb_resnet34.onnx` | [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) 声纹提取模型 (推荐) |
+```python
+from deeptalk_asd import ASDDetectorFactory
+
+asd = ASDDetectorFactory().create()
+```
 
 ### 3. 运行 Demos
 
@@ -73,6 +63,50 @@ pip3 install -e .
     python3 demo/video_asd_demo.py --input demo/demo.mp4 --display
     ```
 
+## 模型管理
+
+### 自动下载（默认）
+
+模型文件在首次使用时自动下载到 `~/.cache/deeptalk_asd/`，后续运行直接从缓存加载。
+
+| 模型 | 大小 | 说明 |
+| :--- | ---: | :--- |
+| `audio_frontend.onnx` | 0.9 MB | LR-ASD 音频前端 |
+| `visual_frontend.onnx` | 1.5 MB | LR-ASD 视觉前端 |
+| `av_backend.onnx` | 0.8 MB | LR-ASD 音视频融合后端 |
+| `silero_vad.onnx` | 2.2 MB | Silero VAD 语音轮次检测 |
+| `Pikachu` | 16 MB | InspireFace 人脸检测资源包 |
+| `wespeaker_zh_cnceleb_resnet34.onnx` | 25 MB | WeSpeaker 声纹特征提取 |
+
+### 预下载模型（离线环境）
+
+```bash
+# 下载所有模型
+python3 -m deeptalk_asd download-models
+
+# 下载到指定目录（方便拷贝到离线机器）
+python3 -m deeptalk_asd download-models --cache-dir /path/to/models
+
+# 查看缓存状态
+python3 -m deeptalk_asd info
+```
+
+### 离线模式
+
+设置 `DEEPTALK_ASD_OFFLINE=1` 可禁止所有网络请求，模型需提前下载好：
+
+```bash
+export DEEPTALK_ASD_OFFLINE=1
+export DEEPTALK_ASD_CACHE_DIR=/path/to/models
+```
+
+### 环境变量
+
+| 环境变量 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `DEEPTALK_ASD_OFFLINE` | _未设置_ | 设为 `1` 启用离线模式，禁止网络下载 |
+| `DEEPTALK_ASD_CACHE_DIR` | `~/.cache/deeptalk_asd/` | 自定义模型缓存目录 |
+
 ## 配置说明
 
 通过工厂方法可以精细化控制各个组件及其参数：
@@ -80,6 +114,10 @@ pip3 install -e .
 ```python
 from deeptalk_asd import ASDDetectorFactory
 
+# 零配置（推荐）
+asd = ASDDetectorFactory().create()
+
+# 自定义配置
 config = {
     "face_detector": {
         "type": "inspireface",

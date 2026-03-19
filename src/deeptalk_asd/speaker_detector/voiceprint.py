@@ -44,7 +44,8 @@ class SpeakerEmbeddingExtractor:
 
     def __init__(
         self,
-        model_path: str,
+        model_dir: str,
+        model_name: str,
         num_threads: int = 2,
         provider: str = "cpu",
         debug: bool = False
@@ -53,7 +54,8 @@ class SpeakerEmbeddingExtractor:
         初始化声纹提取器
         
         Args:
-            model_path: 模型文件路径
+            model_dir: 模型文件所在目录
+            model_name: 模型文件名
             num_threads: 计算线程数
             provider: 计算后端 ("cpu", "cuda", "coreml")
             debug: 是否开启调试模式
@@ -64,13 +66,12 @@ class SpeakerEmbeddingExtractor:
                 "Please install it via: pip install sherpa-onnx"
             )
 
+        model_path = str(Path(model_dir) / model_name)
         self.model_path = model_path
         
-        # 检查模型文件
         if not Path(model_path).exists():
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
         
-        # 创建配置
         config = sherpa_onnx.SpeakerEmbeddingExtractorConfig(
             model=model_path,
             num_threads=num_threads,
@@ -81,7 +82,6 @@ class SpeakerEmbeddingExtractor:
         if not config.validate():
             raise ValueError(f"无效的配置: {config}")
         
-        # 创建提取器
         self.extractor = sherpa_onnx.SpeakerEmbeddingExtractor(config)
         self.dim = self.extractor.dim
         

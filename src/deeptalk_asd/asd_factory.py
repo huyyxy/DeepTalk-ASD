@@ -29,48 +29,44 @@ class ASDDetectorFactory:
         
         也支持完整配置:
             ASDDetectorFactory(
-                face_detector={"type": "inspireface"},
-                turn_detector={"type": "silero-vad", "model_path": "..."},
-                speaker_detector={"type": "LR-ASD-ONNX", "onnx_dir": "..."},
+                face_detector={"type": "inspireface", "model_dir": "..."},
+                turn_detector={"type": "silero-vad", "model_dir": "..."},
+                speaker_detector={"type": "LR-ASD-ONNX", "model_dir": "..."},
             ).create()
 
         参数:
-            kwargs: 包含三个子组件的配置信息:
-                face_detector: dict, 人脸检测器配置, 如 {"type": "inspireface", ...}
-                turn_detector: dict, 轮次检测器配置, 如 {"type": "silero-vad", "model_path": "...", ...}
-                speaker_detector: dict, 说话者检测器配置, 如 {"type": "LR-ASD-ONNX", "onnx_dir": "...", ...}
+            kwargs: 包含三个子组件的配置信息，所有组件统一使用 model_dir 指定模型目录:
+                face_detector: dict, 人脸检测器配置, 如 {"type": "inspireface", "model_dir": "..."}
+                turn_detector: dict, 轮次检测器配置, 如 {"type": "silero-vad", "model_dir": "..."}
+                speaker_detector: dict, 说话者检测器配置, 如 {"type": "LR-ASD-ONNX", "model_dir": "..."}
         """
         self.kwargs = kwargs
 
     def _resolve_face_detector_config(self, face_config: dict) -> dict:
-        """解析人脸检测器配置，自动补充默认模型路径"""
+        """解析人脸检测器配置，自动补充默认模型目录"""
         config = dict(face_config)
-        # InspireFace 资源路径通过环境变量 INSPIREFACE_RESOURCE_PATH 控制
-        # 如果未设置，inspireface_detector.py 会自动使用 model_manager 下载
+        # model_dir 可选；未设置时 InspireFaceDetector 内部自动解析
         return config
 
     def _resolve_turn_detector_config(self, turn_config: dict) -> dict:
-        """解析轮次检测器配置，自动补充默认模型路径"""
+        """解析轮次检测器配置，自动补充默认模型目录"""
         config = dict(turn_config)
-        if config.get("type") == "silero-vad" and "model_path" not in config:
-            config["model_path"] = str(ensure_model("silero_vad.onnx"))
+        if config.get("type") == "silero-vad" and "model_dir" not in config:
+            model_path = ensure_model("silero_vad.onnx")
+            config["model_dir"] = str(model_path.parent)
         return config
 
     def _resolve_speaker_detector_config(self, speaker_config: dict) -> dict:
-        """解析说话者检测器配置，自动补充默认模型路径"""
+        """解析说话者检测器配置，自动补充默认模型目录"""
         config = dict(speaker_config)
         if config.get("type") == "LR-ASD-ONNX":
-            if "onnx_dir" not in config:
-                # 确保 3 个 ASD 核心模型已下载，并使用缓存目录作为 onnx_dir
+            if "model_dir" not in config:
                 cache_dir = get_model_cache_dir()
                 ensure_model("audio_frontend.onnx", cache_dir)
                 ensure_model("visual_frontend.onnx", cache_dir)
                 ensure_model("av_backend.onnx", cache_dir)
-                config["onnx_dir"] = str(cache_dir)
-            if "voiceprint_model_path" not in config:
-                config["voiceprint_model_path"] = str(
-                    ensure_model("wespeaker_zh_cnceleb_resnet34.onnx")
-                )
+                ensure_model("wespeaker_zh_cnceleb_resnet34.onnx", cache_dir)
+                config["model_dir"] = str(cache_dir)
         return config
 
     def create(self) -> ASDInterface:

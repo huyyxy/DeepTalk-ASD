@@ -1,3 +1,4 @@
+import os
 import onnxruntime as ort
 import numpy as np
 import time
@@ -12,7 +13,8 @@ MODEL_RESET_STATES_TIME = 5.0
 class SileroVAD:
     """Silero VAD ONNX 封装 (支持 8kHz/16kHz 及其整数倍采样率，自动降采样和分块处理)"""
 
-    def __init__(self, model_path: str):
+    def __init__(self, model_dir: str, model_name: str = "silero_vad.onnx"):
+        model_path = os.path.join(model_dir, model_name)
         opts = ort.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1

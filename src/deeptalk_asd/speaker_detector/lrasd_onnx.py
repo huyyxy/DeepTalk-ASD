@@ -56,66 +56,68 @@ class LRASDOnnxSpeakerDetector(SpeakerDetectorInterface):
       - av_backend.onnx: 融合音视频特征并输出分数
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        *,
+        model_dir: str = 'weights',
+        voiceprint_model_name: str = 'wespeaker_zh_cnceleb_resnet34.onnx',
+        device: str = 'cpu',
+        video_frame_rate: int = 25,
+        audio_sample_rate: int = 16000,
+    ):
         """
         初始化 LR-ASD ONNX 说话者检测器。
 
         Args:
-            onnx_dir (str): ONNX 模型目录路径，默认自动从缓存加载
-            device (str): 推理设备，'cuda' 或 'cpu'，默认 'cpu'
-            video_frame_rate (int): 视频帧率，默认 25
-            audio_sample_rate (int): 音频采样率，默认 16000
-            voiceprint_model_path (str): 声纹特征提取 ONNX 模型路径，默认自动从缓存加载
+            model_dir: 模型文件所在目录，包含 ASD 核心模型和可选的声纹模型
+            voiceprint_model_name: 声纹模型文件名，在 model_dir 中查找
+            device: 推理设备，'cuda' 或 'cpu'
+            video_frame_rate: 视频帧率
+            audio_sample_rate: 音频采样率
         """
-        self.video_frame_rate = kwargs.get('video_frame_rate', 25)
-        self.audio_sample_rate = kwargs.get('audio_sample_rate', 16000)
-        device = kwargs.get('device', 'cpu')
-        onnx_dir = kwargs.get('onnx_dir', 'weights')
-        voiceprint_model_path = kwargs.get('voiceprint_model_path', None)
+        self.video_frame_rate = video_frame_rate
+        self.audio_sample_rate = audio_sample_rate
 
-        # 解析声纹模型路径：参数指定 > onnx_dir 下查找 > 自动下载
-        if voiceprint_model_path is None:
-            default_path = os.path.join(onnx_dir, 'wespeaker_zh_cnceleb_resnet34.onnx')
-            if os.path.exists(default_path):
-                voiceprint_model_path = default_path
-            else:
-                try:
-                    from ..model_manager import ensure_model
-                    voiceprint_model_path = str(ensure_model("wespeaker_zh_cnceleb_resnet34.onnx"))
-                except Exception as e:
-                    logger.warning(f"无法自动获取声纹模型: {e}")
+        voiceprint_model_path = os.path.join(model_dir, voiceprint_model_name)
+        if not os.path.exists(voiceprint_model_path):
+            try:
+                from ..model_manager import ensure_model
+                voiceprint_model_path = str(ensure_model(voiceprint_model_name))
+            except Exception as e:
+                voiceprint_model_path = None
+                logger.warning(f"无法自动获取声纹模型: {e}")
 
-        # Voiceprint Integration
         self.voice_extractor = None
         if voiceprint_model_path and os.path.exists(voiceprint_model_path):
+            voiceprint_dir = os.path.dirname(voiceprint_model_path)
+            voiceprint_file = os.path.basename(voiceprint_model_path)
             try:
                 self.voice_extractor = SpeakerEmbeddingExtractor(
-                    model_path=voiceprint_model_path,
+                    model_dir=voiceprint_dir,
+                    model_name=voiceprint_file,
                     provider=device
                 )
             except Exception as e:
                 logger.error(f"无法初始化声纹提取器: {e}")
         else:
-            logger.critical(f"[VOICEPRINT] without voiceprint_model_path")
+            logger.critical("[VOICEPRINT] 未找到声纹模型")
         
-        # 选择 ONNX Runtime provider
         if device == 'cuda':
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
         else:
             providers = ['CPUExecutionProvider']
 
-        # 加载 3 个独立的 ONNX 模型
         self.sess_audio = ort.InferenceSession(
-            os.path.join(onnx_dir, 'audio_frontend.onnx'), providers=providers
+            os.path.join(model_dir, 'audio_frontend.onnx'), providers=providers
         )
         self.sess_visual = ort.InferenceSession(
-            os.path.join(onnx_dir, 'visual_frontend.onnx'), providers=providers
+            os.path.join(model_dir, 'visual_frontend.onnx'), providers=providers
         )
         self.sess_backend = ort.InferenceSession(
-            os.path.join(onnx_dir, 'av_backend.onnx'), providers=providers
+            os.path.join(model_dir, 'av_backend.onnx'), providers=providers
         )
         logger.info(
-            f"LR-ASD ONNX models loaded from '{onnx_dir}' "
+            f"LR-ASD ONNX models loaded from '{model_dir}' "
             f"(provider: {self.sess_audio.get_providers()[0]})"
         )
 

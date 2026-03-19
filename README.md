@@ -18,6 +18,7 @@ DeepTalk-ASD is an efficient Active Speaker Detection (ASD) system. By fusing au
     - **TurnDetector**: Audio VAD and turn management (integrates Silero VAD).
     - **SpeakerDetector**: Core decision layer performing audio-visual feature extraction, fusion decision, and speaker comparison (based on LR-ASD ONNX).
 - **High Performance**: Full-pipeline ONNX inference optimized for CPU, supporting real-time operation on mobile devices or standard laptops.
+- **Auto Model Management**: Models are automatically downloaded on first use; supports offline mode and custom cache directories.
 - **Multiple Scenarios**: Provides demos for real-time camera, video files, speaker embedding extraction, and pVAD.
 
 ## System Architecture
@@ -33,32 +34,21 @@ The system works through three main sub-components:
 
 ## Quick Start
 
-### 1. Environment Setup
-
-Python 3.8 or higher is recommended.
+### 1. Install
 
 ```bash
-# Clone the repository
-git clone <repository_url>
-cd DeepTalk-ASD
-
-# Install core dependencies
-python3 -m pip install -r requirements.txt
-
-# Install the project in editable mode
-pip3 install -e .
+pip install deeptalk_asd
 ```
 
-### 2. Model Weights
+### 2. Zero-Configuration Usage
 
-Ensure the `weights` directory contains the following ONNX model files:
+Models are **automatically downloaded** on first use (~46 MB total). No manual setup required:
 
-| Category | Filename | Description |
-| :--- | :--- | :--- |
-| **LR-ASD** | `audio_frontend.onnx`, `visual_frontend.onnx`, `av_backend.onnx` | Core Audio-Visual ASD models |
-| **VAD** | `silero_vad.onnx` | Voice Activity Detection model |
-| **Face** | `Pikachu` | Resources for InspireFace detection |
-| **Voiceprint** | `wespeaker_zh_cnceleb_resnet34.onnx` | [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx) Speaker Embedding model (Recommended) |
+```python
+from deeptalk_asd import ASDDetectorFactory
+
+asd = ASDDetectorFactory().create()
+```
 
 ### 3. Running Demos
 
@@ -73,6 +63,50 @@ Ensure the `weights` directory contains the following ONNX model files:
     python3 demo/video_asd_demo.py --input demo/demo.mp4 --display
     ```
 
+## Model Management
+
+### Auto-Download (Default)
+
+Models are downloaded to `~/.cache/deeptalk_asd/` on first use. Subsequent runs load from cache instantly.
+
+| Model | Size | Description |
+| :--- | ---: | :--- |
+| `audio_frontend.onnx` | 0.9 MB | LR-ASD Audio Frontend |
+| `visual_frontend.onnx` | 1.5 MB | LR-ASD Visual Frontend |
+| `av_backend.onnx` | 0.8 MB | LR-ASD AV Backend |
+| `silero_vad.onnx` | 2.2 MB | Silero VAD |
+| `Pikachu` | 16 MB | InspireFace Detection Resources |
+| `wespeaker_zh_cnceleb_resnet34.onnx` | 25 MB | Speaker Embedding (WeSpeaker) |
+
+### Pre-Download Models (for offline environments)
+
+```bash
+# Download all models
+python3 -m deeptalk_asd download-models
+
+# Download to a specific directory
+python3 -m deeptalk_asd download-models --cache-dir /path/to/models
+
+# Check cache status
+python3 -m deeptalk_asd info
+```
+
+### Offline Mode
+
+Set `DEEPTALK_ASD_OFFLINE=1` to disable all network requests. Models must be pre-downloaded:
+
+```bash
+export DEEPTALK_ASD_OFFLINE=1
+export DEEPTALK_ASD_CACHE_DIR=/path/to/models
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `DEEPTALK_ASD_OFFLINE` | _(unset)_ | Set to `1` to enable offline mode |
+| `DEEPTALK_ASD_CACHE_DIR` | `~/.cache/deeptalk_asd/` | Custom model cache directory |
+
 ## Configuration
 
 Control components and their parameters precisely through the factory method:
@@ -80,6 +114,10 @@ Control components and their parameters precisely through the factory method:
 ```python
 from deeptalk_asd import ASDDetectorFactory
 
+# Zero-configuration (recommended)
+asd = ASDDetectorFactory().create()
+
+# Custom configuration
 config = {
     "face_detector": {
         "type": "inspireface",

@@ -61,10 +61,12 @@ def parse_args():
     parser.add_argument("--face-detector", type=str, default="inspireface")
     parser.add_argument("--turn-detector", type=str, default="silero-vad")
     parser.add_argument("--speaker-detector", type=str, default="LR-ASD-ONNX")
-    parser.add_argument("--onnx-dir", type=str, default=None)
-    parser.add_argument("--vad-model-path", type=str, default=None)
-    parser.add_argument("--voiceprint-model-path", type=str, default=None,
-                        help="声纹模型文件路径 (例如: weights/wespeaker_zh_cnceleb_resnet34.onnx)")
+    parser.add_argument("--model-dir", type=str, default=None,
+                        help="模型文件目录 (默认: <project>/weights)")
+    parser.add_argument("--vad-model-name", type=str, default=None,
+                        help="VAD 模型文件名 (默认: silero_vad.onnx)")
+    parser.add_argument("--voiceprint-model-name", type=str, default=None,
+                        help="声纹模型文件名 (例如: wespeaker_zh_cnceleb_resnet34.onnx)")
     parser.add_argument("--abs-amplitude-threshold", type=float, default=0.01)
     return parser.parse_args()
 
@@ -188,24 +190,24 @@ def draw_face_overlay(frame: np.ndarray, face_profile, speaking_level: str):
 
 def create_asd(args):
     """根据命令行参数创建 ASD 实例"""
-    onnx_dir = args.onnx_dir or os.path.join(PROJECT_ROOT, "weights")
-    vad_model_path = args.vad_model_path or os.path.join(PROJECT_ROOT, "weights", "silero_vad.onnx")
+    model_dir = args.model_dir or os.path.join(PROJECT_ROOT, "weights")
 
     face_detector_config = {"type": args.face_detector}
     turn_detector_config = {
         "type": args.turn_detector,
-        "model_path": vad_model_path,
+        "model_dir": model_dir,
         "prefix_padding_ms": int(EVAL_PREFIX_TRIM_SEC * 1000),
         "abs_amplitude_threshold": args.abs_amplitude_threshold,
-        "silence_duration_ms": int(EVAL_SUFFIX_TRIM_SEC * 1000),  # 缩短静音判定，使 VAD 更快切分不同说话人
-        #"min_voice_duration_ms": EVAL_MIN_CORE_SEC,
+        "silence_duration_ms": int(EVAL_SUFFIX_TRIM_SEC * 1000),
     }
+    if args.vad_model_name:
+        turn_detector_config["model_name"] = args.vad_model_name
     speaker_detector_config = {
         "type": args.speaker_detector,
-        "onnx_dir": onnx_dir,
+        "model_dir": model_dir,
     }
-    if args.voiceprint_model_path:
-        speaker_detector_config["voiceprint_model_path"] = args.voiceprint_model_path
+    if args.voiceprint_model_name:
+        speaker_detector_config["voiceprint_model_name"] = args.voiceprint_model_name
 
     print(f"[ASD] 创建 ASD 实例...")
     print(f"  人脸检测器: {face_detector_config}")
