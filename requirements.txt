@@ -1,6 +1,8 @@
 dotenv
 termcolor
 tornado
+inspireface
+onnxruntime
 python_speech_features
 numpy==1.26.4
 opencv-python
