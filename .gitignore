@@ -195,3 +195,4 @@ cython_debug/
 
 tmp/
 .DS_Store
+CLAUDE.md
