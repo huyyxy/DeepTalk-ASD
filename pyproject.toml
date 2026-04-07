@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "deeptalk-asd"
 version = "0.4.0"
 description = "DeepTalk Active Speaker Detection"
-readme = "README.md"
+readme = "README_LIB.md"
 requires-python = ">=3.8"
 dependencies = [
     "python-dotenv",
